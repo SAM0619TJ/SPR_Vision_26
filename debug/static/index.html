@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPR Vision 26 — Debugger</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d1117; color: #e6edf3; font-family: 'Segoe UI', monospace; }
+
+  header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 12px 20px; background: #161b22; border-bottom: 1px solid #30363d;
+  }
+  header h1 { font-size: 16px; font-weight: 600; }
+  #status { font-size: 12px; padding: 3px 10px; border-radius: 12px; background: #21262d; }
+  #status.connected { background: #1a4731; color: #3fb950; }
+  #status.disconnected { background: #3d1f1f; color: #f85149; }
+
+  .layout { display: flex; height: calc(100vh - 49px); }
+
+  .canvas-wrap {
+    flex: 1; position: relative; background: #010409;
+    display: flex; align-items: center; justify-content: center;
+  }
+  canvas { max-width: 100%; max-height: 100%; display: block; }
+
+  .sidebar {
+    width: 280px; background: #161b22; border-left: 1px solid #30363d;
+    overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px;
+  }
+
+  .card { background: #21262d; border-radius: 8px; padding: 12px; }
+  .card h3 { font-size: 12px; color: #8b949e; text-transform: uppercase;
+              letter-spacing: 0.5px; margin-bottom: 10px; }
+
+  .stat { display: flex; justify-content: space-between; align-items: center;
+          padding: 4px 0; border-bottom: 1px solid #30363d; font-size: 13px; }
+  .stat:last-child { border-bottom: none; }
+  .stat .val { font-weight: 600; color: #58a6ff; }
+  .stat .val.warn { color: #d29922; }
+  .stat .val.ok { color: #3fb950; }
+
+  .det-item {
+    background: #0d1117; border-radius: 6px; padding: 8px; margin-bottom: 6px;
+    font-size: 12px; border-left: 3px solid #58a6ff;
+  }
+  .det-item.red { border-left-color: #f85149; }
+  .det-item.blue { border-left-color: #58a6ff; }
+  .det-item .label { font-weight: 600; margin-bottom: 4px; }
+  .det-item .conf-bar {
+    height: 4px; background: #30363d; border-radius: 2px; margin-top: 6px;
+  }
+  .det-item .conf-fill { height: 100%; border-radius: 2px; background: #3fb950; }
+
+  .controls { display: flex; flex-direction: column; gap: 8px; }
+  label { font-size: 12px; color: #8b949e; }
+  input[type=range] { width: 100%; accent-color: #58a6ff; }
+  .toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 13px;
+  }
+  .switch { position: relative; width: 36px; height: 20px; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; inset: 0; background: #30363d; border-radius: 20px;
+    cursor: pointer; transition: .2s;
+  }
+  .slider:before {
+    content: ''; position: absolute; width: 14px; height: 14px;
+    left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: .2s;
+  }
+  input:checked + .slider { background: #238636; }
+  input:checked + .slider:before { transform: translateX(16px); }
+
+  #fps-counter { font-size: 11px; color: #8b949e; text-align: right; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>SPR Vision 26 — Debugger</h1>
+  <span id="status" class="disconnected">disconnected</span>
+  <span id="fps-counter">-- fps</span>
+</header>
+
+<div class="layout">
+  <div class="canvas-wrap">
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <div class="sidebar">
+    <!-- 性能统计 -->
+    <div class="card">
+      <h3>Performance</h3>
+      <div class="stat"><span>Latency</span><span class="val" id="s-latency">--</span></div>
+      <div class="stat"><span>Detections</span><span class="val" id="s-dets">--</span></div>
+      <div class="stat"><span>Reprojections</span><span class="val" id="s-reproj">--</span></div>
+      <div class="stat"><span>Frame</span><span class="val" id="s-frame">--</span></div>
+    </div>
+
+    <!-- 检测结果列表 -->
+    <div class="card">
+      <h3>Detections</h3>
+      <div id="det-list"></div>
+    </div>
+
+    <!-- 显示控制 -->
+    <div class="card">
+      <h3>Display</h3>
+      <div class="controls">
+        <div class="toggle">
+          <span>Show keypoints</span>
+          <label class="switch"><input type="checkbox" id="show-kpts" checked><span class="slider"></span></label>
+        </div>
+        <div class="toggle">
+          <span>Show reprojection</span>
+          <label class="switch"><input type="checkbox" id="show-reproj" checked><span class="slider"></span></label>
+        </div>
+        <div class="toggle">
+          <span>Show labels</span>
+          <label class="switch"><input type="checkbox" id="show-labels" checked><span class="slider"></span></label>
+        </div>
+        <label>JPEG quality: <span id="q-val">60</span></label>
+        <input type="range" id="quality" min="10" max="95" value="60">
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const ARMOR_NAMES = ['Guard','1','2','3','4','5','Outpost','Base-S','Base-B'];
+const COLOR_NAMES = ['Blue','Red','Gray','Purple'];
+const COLOR_HEX   = ['#58a6ff','#f85149','#8b949e','#bc8cff'];
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const img = new Image();
+
+let frameCount = 0, lastFpsTime = Date.now(), fps = 0;
+let latestData = null;
+
+// ── WebSocket 连接 ────────────────────────────────────────────────────────────
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  const statusEl = document.getElementById('status');
+
+  ws.onopen = () => {
+    statusEl.textContent = 'connected';
+    statusEl.className = 'connected';
+  };
+
+  ws.onclose = () => {
+    statusEl.textContent = 'disconnected';
+    statusEl.className = 'disconnected';
+    setTimeout(connect, 2000);
+  };
+
+  ws.onmessage = (e) => {
+    try {
+      latestData = JSON.parse(e.data);
+      renderFrame(latestData);
+      updateSidebar(latestData);
+      frameCount++;
+    } catch {}
+  };
+}
+
+// ── 渲染帧 ────────────────────────────────────────────────────────────────────
+function renderFrame(data) {
+  img.onload = () => {
+    canvas.width  = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    ctx.drawImage(img, 0, 0);
+
+    if (document.getElementById('show-kpts').checked) {
+      drawDetections(data.detections || []);
+    }
+    if (document.getElementById('show-reproj').checked) {
+      drawReprojections(data.reprojections || []);
+    }
+  };
+  img.src = 'data:image/jpeg;base64,' + data.frame;
+}
+
+function drawDetections(dets) {
+  dets.forEach(d => {
+    const pts = d.pts;
+    if (!pts || pts.length < 4) return;
+    const color = COLOR_HEX[d.color] || '#ffffff';
+
+    // 四边形
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < 4; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // 关键点
+    pts.forEach((p, i) => {
+      ctx.beginPath();
+      ctx.arc(p[0], p[1], 4, 0, Math.PI * 2);
+      ctx.fillStyle = i === 0 ? '#ffa500' : color;
+      ctx.fill();
+    });
+
+    // 标签
+    if (document.getElementById('show-labels').checked) {
+      const cx = pts.reduce((s, p) => s + p[0], 0) / 4;
+      const cy = pts.reduce((s, p) => s + p[1], 0) / 4;
+      const label = `${COLOR_NAMES[d.color]}-${ARMOR_NAMES[d.number]} ${(d.conf*100).toFixed(0)}%`;
+      ctx.font = 'bold 13px monospace';
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(cx - 2, cy - 14, ctx.measureText(label).width + 4, 16);
+      ctx.fillStyle = color;
+      ctx.fillText(label, cx, cy);
+    }
+  });
+}
+
+function drawReprojections(reproj) {
+  reproj.forEach(r => {
+    const pts = r.pts;
+    if (!pts || pts.length < 2) return;
+
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+    ctx.strokeStyle = '#ffd700';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    pts.forEach(p => {
+      ctx.beginPath();
+      ctx.arc(p[0], p[1], 3, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffd700';
+      ctx.fill();
+    });
+  });
+}
+
+// ── 侧边栏更新 ────────────────────────────────────────────────────────────────
+function updateSidebar(data) {
+  const lat = data.latency_ms || 0;
+  const latEl = document.getElementById('s-latency');
+  latEl.textContent = lat.toFixed(1) + ' ms';
+  latEl.className = 'val ' + (lat < 10 ? 'ok' : lat < 20 ? '' : 'warn');
+
+  document.getElementById('s-dets').textContent   = (data.detections   || []).length;
+  document.getElementById('s-reproj').textContent = (data.reprojections || []).length;
+  document.getElementById('s-frame').textContent  =
+    data.frame ? (data.frame.length * 0.75 / 1024).toFixed(1) + ' KB' : '--';
+
+  // 检测列表
+  const list = document.getElementById('det-list');
+  list.innerHTML = '';
+  (data.detections || []).forEach(d => {
+    const div = document.createElement('div');
+    div.className = 'det-item ' + (d.color === 1 ? 'red' : 'blue');
+    div.innerHTML = `
+      <div class="label">${COLOR_NAMES[d.color] || '?'} — ${ARMOR_NAMES[d.number] || '?'}</div>
+      <div>conf: ${(d.conf * 100).toFixed(1)}%</div>
+      <div class="conf-bar"><div class="conf-fill" style="width:${d.conf*100}%"></div></div>`;
+    list.appendChild(div);
+  });
+}
+
+// ── FPS 计数 ──────────────────────────────────────────────────────────────────
+setInterval(() => {
+  const now = Date.now();
+  fps = frameCount / ((now - lastFpsTime) / 1000);
+  frameCount = 0;
+  lastFpsTime = now;
+  document.getElementById('fps-counter').textContent = fps.toFixed(1) + ' fps';
+}, 1000);
+
+// ── 控件事件 ──────────────────────────────────────────────────────────────────
+document.getElementById('quality').addEventListener('input', function() {
+  document.getElementById('q-val').textContent = this.value;
+});
+
+connect();
+</script>
+</body>
+</html>
