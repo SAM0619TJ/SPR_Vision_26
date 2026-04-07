@@ -5,7 +5,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include "io/camera.hpp"
-#include "io/cboard.hpp"
+#include "io/gimbal/gimbal.hpp"
 #include "io/command.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/multithread/commandgener.hpp"
@@ -64,7 +64,7 @@ int main(int argc, char * argv[])
   tools::Plotter plotter;
   tools::Recorder recorder;
   io::Camera camera(config_path);
-  io::CBoard cboard(config_path);
+  io::Gimbal gimbal(config_path);
 
   auto_aim::YOLO yolo(config_path, true);
   auto_aim::Solver solver(config_path);
@@ -118,7 +118,7 @@ int main(int argc, char * argv[])
         cmd.yaw = plan.yaw + yaw_t0_use * plan.yaw_vel;
         cmd.pitch = plan.pitch;
         cmd.horizon_distance = 0.0;
-        cboard.send(cmd);
+        gimbal.send_command_scm(cmd);
 
         std::this_thread::sleep_for(10ms);
       } else {
@@ -128,19 +128,11 @@ int main(int argc, char * argv[])
   });
 
   while (!exiter.exit()) {
-    // 模式：可用 YAML 强制自瞄，或根据 CBoard 模式映射
+    // 模式：可用 YAML 强制自瞄，或直接使用 Gimbal 模式
     if (force_auto_aim) {
       mode = io::GimbalMode::AUTO_AIM;
     } else {
-      io::GimbalMode mapped = io::GimbalMode::IDLE;
-      switch (cboard.mode) {
-        case io::Mode::idle:       mapped = io::GimbalMode::IDLE; break;
-        case io::Mode::auto_aim:   mapped = io::GimbalMode::AUTO_AIM; break;
-        case io::Mode::small_buff: mapped = io::GimbalMode::SMALL_BUFF; break;
-        case io::Mode::big_buff:   mapped = io::GimbalMode::BIG_BUFF; break;
-        case io::Mode::outpost:    mapped = io::GimbalMode::IDLE; break; // 可按需调整
-      }
-      mode = mapped;
+      mode = gimbal.mode();
     }
 
     if (last_mode != mode) {
@@ -150,13 +142,10 @@ int main(int argc, char * argv[])
     }
 
     camera.read(img, t);
-    q = cboard.imu_at(t);
-    // 从 CBoard 接收弹速（其他角度信息由算法估计，设为 0）
-    bullet_speed_atomic = cboard.bullet_speed;
-    io::GimbalState gs{};
-    gs.yaw = 0; gs.yaw_vel = 0; gs.pitch = 0; gs.pitch_vel = 0;
-    gs.bullet_speed = static_cast<float>(bullet_speed_atomic.load());
-    gs.bullet_count = 0;
+    q = gimbal.q(t);
+    // 从 Gimbal 接收弹速
+    auto gs = gimbal.state();
+    bullet_speed_atomic = gs.bullet_speed;
     recorder.record(img, q, t);
     solver.set_R_gimbal2world(q);
 
@@ -175,7 +164,7 @@ int main(int argc, char * argv[])
       if (!enable_buff) {
         // 未启用打符，保持不控，避免误触发
         io::Command idle{}; idle.control = false; idle.shoot = false; idle.yaw = 0; idle.pitch = 0; idle.horizon_distance = 0;
-        cboard.send(idle);
+        gimbal.send_command_scm(idle);
       } else {
         buff_solver->set_R_gimbal2world(q);
 
@@ -202,12 +191,12 @@ int main(int argc, char * argv[])
   cmd2.yaw = buff_plan.yaw + buff_yaw_t0_use * buff_plan.yaw_vel;
         cmd2.pitch = buff_plan.pitch;
         cmd2.horizon_distance = 0.0;
-        cboard.send(cmd2);
+        gimbal.send_command_scm(cmd2);
       }
 
     } else {
       io::Command idle{}; idle.control = false; idle.shoot = false; idle.yaw = 0; idle.pitch = 0; idle.horizon_distance = 0;
-      cboard.send(idle);
+      gimbal.send_command_scm(idle);
     }
 
     // Debug preview window for standard_mpc
@@ -220,7 +209,7 @@ int main(int argc, char * argv[])
     
   if (plan_thread.joinable()) plan_thread.join();
   io::Command stop{}; stop.control = false; stop.shoot = false; stop.yaw = 0; stop.pitch = 0; stop.horizon_distance = 0;
-  cboard.send(stop);
+  gimbal.send_command_scm(stop);
 
   return 0;
 }

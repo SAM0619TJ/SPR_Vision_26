@@ -93,7 +93,6 @@ SPR_Vision_26/
 │   └── usage_example.cpp         # 集成示例
 ├── io/                           # 相机、串口、云台驱动
 ├── tools/                        # EKF、轨迹、日志等工具
-├── librm/                        # RM 协议库
 ├── calibration/                  # 标定工具
 ├── tests/                        # 测试程序
 └── configs/                      # YAML 配置文件

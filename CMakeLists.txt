@@ -126,7 +126,7 @@ if(TensorRT_FOUND)
   include_directories(${TensorRT_INCLUDE_DIR})
 endif()
 
-# ── ROS2 可选 ─────────────────────────────────────────────────────────────────
+# ── ROS2 Foxy 可选 ────────────────────────────────────────────────────────────
 find_package(ament_cmake QUIET)
 find_package(rclcpp QUIET)
 find_package(std_msgs QUIET)
@@ -141,7 +141,7 @@ add_subdirectory(debug)
 add_subdirectory(tasks/auto_aim)
 add_subdirectory(tasks/auto_buff)
 add_subdirectory(tasks/omniperception)
-add_subdirectory(librm)
+# add_subdirectory(librm)  # librm 目录不存在，暂时禁用
 
 # ── 可执行文件 ────────────────────────────────────────────────────────────────
 add_executable(standard src/standard.cpp)
@@ -185,10 +185,10 @@ target_link_libraries(planner_test_offline fmt::fmt yaml-cpp auto_aim tools io $
 add_executable(camera_planner_realtime tests/camera_planner_realtime.cpp)
 target_link_libraries(camera_planner_realtime fmt::fmt yaml-cpp auto_aim tools io ${OpenCV_LIBS})
 
-# ── ROS2 可选编译 ─────────────────────────────────────────────────────────────
+# ── ROS2 Foxy 可选编译 ────────────────────────────────────────────────────────
 if(ament_cmake_FOUND AND rclcpp_FOUND AND std_msgs_FOUND
    AND visualization_msgs_FOUND AND tf2_ros_FOUND AND geometry_msgs_FOUND)
-  message(STATUS "ROS2 found, compiling standard_ros2")
+  message(STATUS "ROS2 Foxy found, compiling standard_ros2")
   add_executable(standard_ros2 src/standard.cpp)
   target_link_libraries(standard_ros2
     fmt::fmt yaml-cpp auto_aim tools io rclcpp::rclcpp ${OpenCV_LIBS})
