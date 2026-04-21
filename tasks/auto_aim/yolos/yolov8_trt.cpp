@@ -49,9 +49,6 @@ YOLOV8_TRT::YOLOV8_TRT(const std::string & config_path, bool debug)
   roi_ = cv::Rect(x, y, width, height);
   offset_ = cv::Point2f(x, y);
 
-  save_path_ = "imgs";
-  std::filesystem::create_directory(save_path_);
-
   cudaSetDevice(0);
   cudaStreamCreate(&stream_);
 
@@ -81,7 +78,7 @@ YOLOV8_TRT::YOLOV8_TRT(const std::string & config_path, bool debug)
     throw std::runtime_error("Failed to create execution context");
   }
 
-  // ── 兼容层：获取 tensor 名称和形状
+  // ── 获取 tensor 名称和形状
   const char * input_name  = trt_get_tensor_name(engine_.get(), 0);
   const char * output_name = trt_get_tensor_name(engine_.get(), 1);
   auto input_dims  = trt_get_tensor_shape(engine_.get(), input_name,  0);
@@ -95,12 +92,12 @@ YOLOV8_TRT::YOLOV8_TRT(const std::string & config_path, bool debug)
   std::string output_dtype_str = (output_dtype == nvinfer1::DataType::kFLOAT) ? "FP32" :
                                   (output_dtype == nvinfer1::DataType::kHALF)  ? "FP16" : "OTHER";
 
-  tools::logger()->warn("[YOLOV8_TRT] ===== Engine Tensor Info =====");
-  tools::logger()->warn("[YOLOV8_TRT] Input: '{}' shape=[{},{},{},{}] dtype={}",
+  tools::logger()->info("[YOLOV8_TRT] ===== Engine Tensor Info =====");
+  tools::logger()->info("[YOLOV8_TRT] Input: '{}' shape=[{},{},{},{}] dtype={}",
     input_name, input_dims.d[0], input_dims.d[1], input_dims.d[2], input_dims.d[3], input_dtype_str);
-  tools::logger()->warn("[YOLOV8_TRT] Output: '{}' shape=[{},{},{}] dtype={}",
+  tools::logger()->info("[YOLOV8_TRT] Output: '{}' shape=[{},{},{}] dtype={}",
     output_name, output_dims.d[0], output_dims.d[1], output_dims.d[2], output_dtype_str);
-  tools::logger()->warn("[YOLOV8_TRT] ==============================");
+  tools::logger()->info("[YOLOV8_TRT] ==============================");
 
   input_w_ = input_dims.d[3];
   input_h_ = input_dims.d[2];
@@ -145,7 +142,6 @@ YOLOV8_TRT::YOLOV8_TRT(const std::string & config_path, bool debug)
     throw std::runtime_error("Failed to allocate GPU image buffer");
   }
 
-  // ── 兼容层：TRT 10.x 预绑定地址，TRT 8.x 为空操作
   trt_set_tensor_address(context_.get(), input_name,  0, buffers_[0]);
   trt_set_tensor_address(context_.get(), output_name, 1, buffers_[1]);
 
@@ -206,12 +202,25 @@ void YOLOV8_TRT::buildEngineFromONNX(const std::string & onnx_file)
   auto config = std::unique_ptr<nvinfer1::IBuilderConfig, void(*)(nvinfer1::IBuilderConfig*)>(
     builder->createBuilderConfig(), [](nvinfer1::IBuilderConfig* p) { if(p) delete p; });
 
-  // ── 兼容层
   trt_set_workspace(config.get(), 1U << 30);
 
   if (builder->platformHasFastFp16()) {
     config->setFlag(nvinfer1::BuilderFlag::kFP16);
     tools::logger()->info("[YOLOV8_TRT] FP16 enabled");
+  }
+
+  // 为动态shape输入添加optimization profile（固定batch=1, 640x640）
+  auto input = network->getInput(0);
+  if (input && input->getDimensions().d[0] == -1) {
+    auto profile = builder->createOptimizationProfile();
+    nvinfer1::Dims4 min_dims{1, 3, input_h_, input_w_};
+    nvinfer1::Dims4 opt_dims{1, 3, input_h_, input_w_};
+    nvinfer1::Dims4 max_dims{1, 3, input_h_, input_w_};
+    profile->setDimensions(input->getName(), nvinfer1::OptProfileSelector::kMIN, min_dims);
+    profile->setDimensions(input->getName(), nvinfer1::OptProfileSelector::kOPT, opt_dims);
+    profile->setDimensions(input->getName(), nvinfer1::OptProfileSelector::kMAX, max_dims);
+    config->addOptimizationProfile(profile);
+    tools::logger()->info("[YOLOV8_TRT] Added optimization profile for dynamic input");
   }
 
   auto serialized_engine = std::unique_ptr<nvinfer1::IHostMemory, void(*)(nvinfer1::IHostMemory*)>(
@@ -269,6 +278,15 @@ std::list<Armor> YOLOV8_TRT::detect(const cv::Mat & raw_img, int frame_count)
   int pad_y = (input_h_ - static_cast<int>(bgr_img.rows * scale)) / 2;
 
   size_t img_size = bgr_img.cols * bgr_img.rows * 3 * sizeof(unsigned char);
+  if (img_size > gpu_img_buffer_size_) {
+    tools::logger()->error(
+      "[YOLOV8_TRT] img_size {} exceeds gpu_img_buffer_size_ {}, img={}x{}",
+      img_size, gpu_img_buffer_size_, bgr_img.cols, bgr_img.rows);
+    cudaFree(gpu_img_buffer_);
+    gpu_img_buffer_size_ = img_size;
+    cudaMalloc(&gpu_img_buffer_, gpu_img_buffer_size_);
+    tools::logger()->warn("[YOLOV8_TRT] GPU image buffer reallocated to {} bytes", gpu_img_buffer_size_);
+  }
   cudaMemcpyAsync(gpu_img_buffer_, bgr_img.data, img_size, cudaMemcpyHostToDevice, stream_);
 
   cuda_preprocess_letterbox(
@@ -298,13 +316,19 @@ std::list<Armor> YOLOV8_TRT::detect(const cv::Mat & raw_img, int frame_count)
     cudaMemcpyAsync(output_host_, gpu_topk_buffer_, topk_size, cudaMemcpyDeviceToHost, stream_);
     cudaStreamSynchronize(stream_);
 
-    // ── 兼容层
+    // ── 推理
     trt_enqueue(context_.get(), buffers_, stream_);
 
     auto result = parse(prev_scale_, prev_pad_x_, prev_pad_y_, output_host_,
                        actual_topk, output_data_size_, prev_raw_img_, prev_frame_count_);
 
+    auto t_clone_start = std::chrono::high_resolution_clock::now();
     prev_raw_img_ = bgr_img.clone();
+    auto t_clone_end = std::chrono::high_resolution_clock::now();
+    double clone_ms = std::chrono::duration<double, std::milli>(t_clone_end - t_clone_start).count();
+    if (clone_ms > 2.0)
+      tools::logger()->warn("[YOLOV8_TRT] async clone took {:.2f}ms ({}x{})",
+        clone_ms, bgr_img.cols, bgr_img.rows);
     prev_scale_ = scale;
     prev_pad_x_ = pad_x;
     prev_pad_y_ = pad_y;
@@ -312,7 +336,7 @@ std::list<Armor> YOLOV8_TRT::detect(const cv::Mat & raw_img, int frame_count)
 
     return result;
   } else {
-    // ── 兼容层
+    // ── 推理
     trt_enqueue(context_.get(), buffers_, stream_);
     auto t_infer = std::chrono::high_resolution_clock::now();
 
@@ -343,7 +367,13 @@ std::list<Armor> YOLOV8_TRT::detect(const cv::Mat & raw_img, int frame_count)
 
     if (use_async_inference_) {
       first_frame_ = false;
+      auto t_clone_start2 = std::chrono::high_resolution_clock::now();
       prev_raw_img_ = bgr_img.clone();
+      auto t_clone_end2 = std::chrono::high_resolution_clock::now();
+      double clone_ms2 = std::chrono::duration<double, std::milli>(t_clone_end2 - t_clone_start2).count();
+      if (clone_ms2 > 2.0)
+        tools::logger()->warn("[YOLOV8_TRT] sync clone took {:.2f}ms ({}x{})",
+          clone_ms2, bgr_img.cols, bgr_img.rows);
       prev_scale_ = scale;
       prev_pad_x_ = pad_x;
       prev_pad_y_ = pad_y;
@@ -472,7 +502,9 @@ void YOLOV8_TRT::draw_detections(
     cv::putText(vis, fmt::format("{:.2f}", armor.confidence), armor.points[0],
       cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 255), 1);
   }
-  cv::imwrite(fmt::format("{}/frame_{:04d}.jpg", save_path_, frame_count), vis);
+  cv::resize(vis, vis, {}, 0.5, 0.5);
+  cv::imshow("YOLOV8_TRT Detection", vis);
+  cv::waitKey(1);
 }
 
 }  // namespace auto_aim

@@ -53,6 +53,22 @@ int cuda_topk_filter(
     float score_threshold,
     cudaStream_t stream);
 
+/**
+ * CUDA预处理kernel：完成resize + letterbox + normalize + BGR2GRAY → NCHW单通道
+ *
+ * 输入：GPU上的原始图像 (HWC格式, BGR, uint8)
+ * 输出：GPU上的预处理后数据 (NCHW格式, 单通道灰度, float32, 归一化到[0,1])
+ * 输出shape: [1, 1, dst_height, dst_width]
+ */
+void cuda_preprocess_letterbox_gray(
+    const unsigned char* src_device,
+    int src_width,
+    int src_height,
+    float* dst_device,
+    int dst_width,
+    int dst_height,
+    cudaStream_t stream);
+
 }  // namespace auto_aim
 
 #endif  // AUTO_AIM__CUDA_PREPROCESS_HPP

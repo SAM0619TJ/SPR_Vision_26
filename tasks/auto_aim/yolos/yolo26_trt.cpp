@@ -74,9 +74,6 @@ YOLO26_TRT::YOLO26_TRT(const std::string & config_path, bool debug)
   roi_    = cv::Rect(x, y, width, height);
   offset_ = cv::Point2f(x, y);
 
-  save_path_ = "imgs";
-  std::filesystem::create_directory(save_path_);
-
   cudaSetDevice(0);
   cudaStreamCreate(&stream_);
 
@@ -100,15 +97,15 @@ YOLO26_TRT::YOLO26_TRT(const std::string & config_path, bool debug)
   context_.reset(engine_->createExecutionContext());
   if (!context_) throw std::runtime_error("Failed to create execution context");
 
-  // ── 兼容层：获取 tensor 名称
+  // ── 获取 tensor 名称
   const char * input_name  = trt_get_tensor_name(engine_.get(), 0);
   const char * output_name = trt_get_tensor_name(engine_.get(), 1);
 
-  // ── 兼容层：获取数据类型
+  // ── 获取数据类型
   input_dtype_  = trt_get_tensor_dtype(engine_.get(), input_name,  0);
   output_dtype_ = trt_get_tensor_dtype(engine_.get(), output_name, 1);
 
-  // ── 兼容层：获取静态输入形状
+  // ── 获取静态输入形状
   auto input_dims = trt_get_tensor_shape(engine_.get(), input_name, 0);
   if (input_dims.nbDims == 4 && input_dims.d[2] > 0 && input_dims.d[3] > 0) {
     input_h_ = input_dims.d[2];

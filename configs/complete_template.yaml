@@ -127,14 +127,14 @@ judge_distance: 4
 auto_fire: true
 
 #####-----相机配置-----#####
-camera_name: "daheng"
+camera_name: "hikrobot"
 
 # 相机基础参数
 exposure_ms: 2.1        # 曝光时间（毫秒）
 gain: 18                # 增益  24
 
 # 相机VID:PID（用于识别特定相机）
-vid_pid: "2ba2:4d55"    # 大恒相机的VID:PID
+vid_pid: "2bdf:0001"    # 海康相机的VID:PID
 
 # 是否启用调试模式
 debug: true

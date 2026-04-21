@@ -1,5 +1,5 @@
-#ifndef AUTO_AIM__YOLO11_TRT_HPP
-#define AUTO_AIM__YOLO11_TRT_HPP
+#ifndef AUTO_AIM__YOLOV5_TRT_HPP
+#define AUTO_AIM__YOLOV5_TRT_HPP
 
 #include <NvInfer.h>
 #include <NvOnnxParser.h>
@@ -18,11 +18,11 @@
 namespace auto_aim
 {
 
-class YOLO11_TRT : public YOLOBase
+class YOLOV5_TRT : public YOLOBase
 {
 public:
-  YOLO11_TRT(const std::string & config_path, bool debug);
-  ~YOLO11_TRT();
+  YOLOV5_TRT(const std::string & config_path, bool debug);
+  ~YOLOV5_TRT();
 
   std::list<Armor> detect(const cv::Mat & bgr_img, int frame_count) override;
 
@@ -33,13 +33,10 @@ private:
   std::string device_;
   std::string engine_path_;
   std::string onnx_path_;
-  bool debug_, use_roi_;
-  bool use_async_inference_;
-  bool use_traditional_;
+  bool debug_, use_roi_, use_traditional_;
 
-  const int class_num_ = 16;
-  const float nms_threshold_ = 0.3;
-  const float score_threshold_ = 0.7;
+  const float nms_threshold_ = 0.3f;
+  const float score_threshold_ = 0.7f;
   double min_confidence_, binary_threshold_;
 
   Logger logger_;
@@ -48,42 +45,31 @@ private:
   std::unique_ptr<nvinfer1::IExecutionContext, void(*)(nvinfer1::IExecutionContext*)> context_;
 
   cudaStream_t stream_;
-
   void * buffers_[2];
-  cv::Mat input_image_;
   float * output_host_;
-
-  // CUDA加速预处理：GPU图像buffer + pinned memory输入
-  unsigned char * gpu_img_buffer_ = nullptr;  // GPU上的原始图像buffer
-  float * input_host_pinned_ = nullptr;        // Pinned memory（已弃用，直接用GPU buffer）
-  size_t gpu_img_buffer_size_ = 0;             // 当前分配的GPU图像buffer大小
+  unsigned char * gpu_img_buffer_;
+  size_t gpu_img_buffer_size_;
 
   size_t input_size_;
   size_t output_size_;
 
-  int input_w_ = 640;
-  int input_h_ = 640;
-  int output_num_detections_;
-  int output_data_size_;
-
-  bool first_frame_ = true;
-  cv::Mat prev_raw_img_;
-  float prev_scale_ = 1.0f;
-  int prev_pad_x_ = 0;
-  int prev_pad_y_ = 0;
-  int prev_frame_count_ = 0;
+  const int input_w_ = 640;
+  const int input_h_ = 640;
+  // YOLOv5 anchor-based: 25200 detections, 22 features each
+  // features: [kpt0x,kpt0y,kpt1x,kpt1y,kpt2x,kpt2y,kpt3x,kpt3y, obj, c0..c3(color), n0..n8(num)]
+  int output_num_detections_ = 25200;
+  int output_data_size_ = 22;
 
   cv::Rect roi_;
   cv::Point2f offset_;
-  cv::Mat tmp_img_;
   Detector detector_;
 
   bool check_name(const Armor & armor) const;
   bool check_type(const Armor & armor) const;
   std::list<Armor> parse(
-    float scale, int pad_x, int pad_y, cv::Mat & output, const cv::Mat & bgr_img,
+    double scale, float * output_data, int num_detections, const cv::Mat & bgr_img,
     int frame_count);
-  void draw_detections(const cv::Mat & img, const std::list<Armor> & armors, int frame_count) const;
+  double sigmoid(double x);
 
   void loadEngine(const std::string & engine_file);
   void buildEngineFromONNX(const std::string & onnx_file);
@@ -92,4 +78,4 @@ private:
 
 }  // namespace auto_aim
 
-#endif  // AUTO_AIM__YOLO11_TRT_HPP
+#endif  // AUTO_AIM__YOLOV5_TRT_HPP

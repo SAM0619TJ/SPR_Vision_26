@@ -48,9 +48,6 @@ YOLO11_TRT::YOLO11_TRT(const std::string & config_path, bool debug)
   roi_ = cv::Rect(x, y, width, height);
   offset_ = cv::Point2f(x, y);
 
-  save_path_ = "imgs";
-  std::filesystem::create_directory(save_path_);
-
   cudaSetDevice(0);
   cudaStreamCreate(&stream_);
 
@@ -80,7 +77,7 @@ YOLO11_TRT::YOLO11_TRT(const std::string & config_path, bool debug)
     throw std::runtime_error("Failed to create execution context");
   }
 
-  // ── 兼容层：TRT 8.x 用 getBindingName/getBindingDimensions，TRT 10.x 用 getIOTensorName/getTensorShape
+  // ── 获取 tensor 名称和形状
   const char * input_name  = trt_get_tensor_name(engine_.get(), 0);
   const char * output_name = trt_get_tensor_name(engine_.get(), 1);
   auto input_dims  = trt_get_tensor_shape(engine_.get(), input_name,  0);
@@ -105,7 +102,6 @@ YOLO11_TRT::YOLO11_TRT(const std::string & config_path, bool debug)
   gpu_img_buffer_size_ = 1920 * 1080 * 3;
   cudaMalloc(&gpu_img_buffer_, gpu_img_buffer_size_);
 
-  // ── 兼容层：TRT 10.x 需要预先 setTensorAddress，TRT 8.x 此调用为空操作
   trt_set_tensor_address(context_.get(), input_name,  0, buffers_[0]);
   trt_set_tensor_address(context_.get(), output_name, 1, buffers_[1]);
 
@@ -164,13 +160,25 @@ void YOLO11_TRT::buildEngineFromONNX(const std::string & onnx_file)
   auto config = std::unique_ptr<nvinfer1::IBuilderConfig, void(*)(nvinfer1::IBuilderConfig*)>(
     builder->createBuilderConfig(), [](nvinfer1::IBuilderConfig* p) { if(p) delete p; });
 
-  // ── 兼容层：TRT 10.x 用 setMemoryPoolLimit，TRT 8.x 用 setMaxWorkspaceSize
   trt_set_workspace(config.get(), 1U << 30);
 
-  // FP16 加速（Xavier NX Tensor Core 支持）
   if (builder->platformHasFastFp16()) {
     config->setFlag(nvinfer1::BuilderFlag::kFP16);
     tools::logger()->info("[YOLO11_TRT] FP16 enabled");
+  }
+
+  // 为动态shape输入添加optimization profile（固定batch=1, 640x640）
+  auto input = network->getInput(0);
+  if (input && input->getDimensions().d[0] == -1) {
+    auto profile = builder->createOptimizationProfile();
+    nvinfer1::Dims4 min_dims{1, 3, input_h_, input_w_};
+    nvinfer1::Dims4 opt_dims{1, 3, input_h_, input_w_};
+    nvinfer1::Dims4 max_dims{1, 3, input_h_, input_w_};
+    profile->setDimensions(input->getName(), nvinfer1::OptProfileSelector::kMIN, min_dims);
+    profile->setDimensions(input->getName(), nvinfer1::OptProfileSelector::kOPT, opt_dims);
+    profile->setDimensions(input->getName(), nvinfer1::OptProfileSelector::kMAX, max_dims);
+    config->addOptimizationProfile(profile);
+    tools::logger()->info("[YOLO11_TRT] Added optimization profile for dynamic input");
   }
 
   auto serialized_engine = std::unique_ptr<nvinfer1::IHostMemory, void(*)(nvinfer1::IHostMemory*)>(
@@ -249,7 +257,6 @@ std::list<Armor> YOLO11_TRT::detect(const cv::Mat & raw_img, int frame_count)
 
     cv::Mat output(output_num_detections_, output_data_size_, CV_32F, output_host_);
     auto result = parse(prev_scale_, prev_pad_x_, prev_pad_y_, output, prev_raw_img_, prev_frame_count_);
-
     prev_raw_img_ = bgr_img.clone();
     prev_scale_ = scale;
     prev_pad_x_ = pad_x;
@@ -396,7 +403,9 @@ void YOLO11_TRT::draw_detections(
       vis, fmt::format("{:.2f}", armor.confidence), armor.points[0],
       cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 255), 1);
   }
-  cv::imwrite(fmt::format("{}/frame_{:04d}.jpg", save_path_, frame_count), vis);
+  cv::resize(vis, vis, {}, 0.5, 0.5);
+  cv::imshow("YOLO11_TRT Detection", vis);
+  cv::waitKey(1);
 }
 
 }  // namespace auto_aim

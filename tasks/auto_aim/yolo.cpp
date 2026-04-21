@@ -17,6 +17,7 @@
 #include "yolos/yolo11_trt.hpp"
 #include "yolos/yolo26_trt.hpp"
 #include "yolos/yolov8_trt.hpp"
+#include "yolos/yolov5_trt.hpp"
 #endif
 
 namespace auto_aim
@@ -105,11 +106,16 @@ YOLO::YOLO(const std::string & config_path, bool debug)
         yolo_ = std::make_unique<YOLO26_TRT>(config_path, debug);
         return;
       }
+      else if (yolo_name == "yolov5") {
+        tools::logger()->info("[YOLO] backend=tensorrt model=yolov5 impl=YOLOV5_TRT config={}", config_path);
+        yolo_ = std::make_unique<YOLOV5_TRT>(config_path, debug);
+        return;
+      }
 
       throw std::runtime_error(
         "=== TensorRT Model Not Supported ===\n"
         "Model '" + yolo_name + "' is not supported with TensorRT backend!\n"
-        "TensorRT supports: yolo11, yolov8, yolo26\n"
+        "TensorRT supports: yolo11, yolov8, yolo26, yolov5\n"
       );
     #endif
   }

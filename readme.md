@@ -1,6 +1,6 @@
 # SPR_Vision_26
 
-RoboMaster 视觉系统，针对 **Nvidia Jetson Xavier NX 8G**（JetPack 5.x，TRT 8.5）优化。
+RoboMaster 视觉系统，针对 **Nvidia Jetson Xavier NX 8G**（JetPack 6.x，TRT 10.x）优化。
 从 sp_vision_25-TRT（Orin NX，TRT 10.x）移植，集成 RobotDetectionModel（0708.onnx）权重。
 
 ---
@@ -10,11 +10,11 @@ RoboMaster 视觉系统，针对 **Nvidia Jetson Xavier NX 8G**（JetPack 5.x，
 | 项目 | 规格 |
 | --- | --- |
 | 平台 | Jetson Xavier NX 8G |
-| JetPack | 5.x |
-| CUDA | 11.4 |
-| TensorRT | 8.5 |
+| JetPack | 6.x |
+| CUDA | 12.6 |
+| TensorRT | 10.* |
 | cuDNN | 8.6 |
-| CUDA 架构 | SM 7.2（Volta） |
+| CUDA 架构 | SM （Volta） |
 
 ---
 
@@ -152,3 +152,43 @@ debugger.push(frame, dets, {}, latency_ms);
 - 输入：640×640，输出：25200×22（YOLO grid）
 - 首次运行自动通过 `nvonnxparser` 转换为 TRT engine（`.trt` 缓存）
 - FP16 自动检测：`builder->platformHasFastFp16()` 为 true 时启用（Xavier NX Tensor Core）
+
+7. 串口设置
+    1. 授予权限
+        ```
+        sudo usermod -a -G dialout $USER
+        ```
+    2. 获取端口 ID（serial, idVendor, idProduct）
+        ```
+        udevadm info -a -n /dev/ttyACM0 | grep -E '({serial}|{idVendor}|{idProduct})'
+        ```
+        将 /dev/ttyACM0 替换为实际设备名。
+    3. 创建 udev 规则文件
+        ```
+        sudo touch /etc/udev/rules.d/99-usb-serial.rules
+        ```
+        然后在文件中写入如下内容（用真实 ID 替换示例，SYMLINK 是规则应用后固定的串口名）：
+        ```
+        SUBSYSTEM=="tty", ATTRS{idVendor}=="1234", ATTRS{idProduct}=="1234", ATTRS{serial}=="A1234567", SYMLINK+="gimbal"
+        
+        
+pr@ubuntu:~$ udevadm info -a -n /dev/ttyCH341USB0 | grep -E '({serial}|{idVendor}|{idProduct})'
+    ATTRS{idProduct}=="7523"
+    ATTRS{idVendor}=="1a86"
+    ATTRS{idProduct}=="0101"
+    ATTRS{idVendor}=="1a40"
+    ATTRS{idProduct}=="0002"
+    ATTRS{idVendor}=="1d6b"
+    ATTRS{serial}=="3610000.usb"
+        ```
+    4. 重新加载 udev 规则
+        ```
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger
+        ```
+    5. 检查结果
+        ```
+        ls -l /dev/gimbal
+        # Expected output (example):
+        # lrwxrwxrwx 1 root root 7 Jul 21 10:00 /dev/gimbal -> ttyACM0
+        ```

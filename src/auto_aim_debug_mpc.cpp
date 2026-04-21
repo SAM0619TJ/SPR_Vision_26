@@ -54,7 +54,12 @@ int main(int argc, char * argv[])
     uint16_t last_bullet_count = 0;
 
     while (!quit) {
+      auto t_front_start = std::chrono::steady_clock::now();
       auto target = target_queue.front();
+      auto t_front_end = std::chrono::steady_clock::now();
+      double front_ms = std::chrono::duration<double, std::milli>(t_front_end - t_front_start).count();
+      if (front_ms > 5.0)
+        tools::logger()->warn("[plan] front() blocked {:.1f}ms", front_ms);
       auto gs = gimbal.state();
       auto plan = planner.plan(target, gs.bullet_speed);
 
@@ -108,36 +113,53 @@ int main(int argc, char * argv[])
   std::chrono::steady_clock::time_point t;
 
   while (!exiter.exit()) {
+    auto t_frame_start = std::chrono::steady_clock::now();
+
     camera.read(img, t);
     auto q = gimbal.q(t);
 
     solver.set_R_gimbal2world(q);
+
+    auto t_detect_start = std::chrono::steady_clock::now();
     auto armors = yolo.detect(img);
+    auto t_detect_end = std::chrono::steady_clock::now();
+
     auto targets = tracker.track(armors, t);
+
+    auto t_push_start = std::chrono::steady_clock::now();
     if (!targets.empty())
       target_queue.push(targets.front());
     else
       target_queue.push(std::nullopt);
+    auto t_push_end = std::chrono::steady_clock::now();
+
+    double detect_ms = std::chrono::duration<double, std::milli>(t_detect_end - t_detect_start).count();
+    double push_ms   = std::chrono::duration<double, std::milli>(t_push_end - t_push_start).count();
+    double frame_ms  = std::chrono::duration<double, std::milli>(t_push_end - t_frame_start).count();
+    tools::logger()->info("[main] detect={:.1f}ms push_wait={:.1f}ms frame={:.1f}ms",
+      detect_ms, push_ms, frame_ms);
+
+    cv::Mat display;
+    cv::cvtColor(img, display, cv::COLOR_RGB2BGR);
 
     if (!targets.empty()) {
       auto target = targets.front();
 
-      // 当前帧target更新后
       std::vector<Eigen::Vector4d> armor_xyza_list = target.armor_xyza_list();
       for (const Eigen::Vector4d & xyza : armor_xyza_list) {
         auto image_points =
           solver.reproject_armor(xyza.head(3), xyza[3], target.armor_type, target.name);
-        tools::draw_points(img, image_points, {0, 255, 0});
+        tools::draw_points(display, image_points, {0, 255, 0});
       }
 
       Eigen::Vector4d aim_xyza = planner.debug_xyza;
       auto image_points =
         solver.reproject_armor(aim_xyza.head(3), aim_xyza[3], target.armor_type, target.name);
-      tools::draw_points(img, image_points, {0, 0, 255});
+      tools::draw_points(display, image_points, {0, 0, 255});
     }
 
-    cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
-    cv::imshow("reprojection", img);
+    cv::resize(display, display, {}, 0.5, 0.5);
+    cv::imshow("reprojection", display);
     auto key = cv::waitKey(1);
     if (key == 'q') break;
   }

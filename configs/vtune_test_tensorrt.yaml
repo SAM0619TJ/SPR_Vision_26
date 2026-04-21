@@ -84,11 +84,15 @@ judge_distance: 4
 auto_fire: true
 
 #####-----相机配置-----#####
-camera_name: "daheng"
-exposure_ms: 2.1
-gain: 24
-vid_pid: "2ba2:4d55"
-debug: true
+# camera_name: "daheng"
+# exposure_ms: 2.1
+# gain: 24
+# vid_pid: "2ba2:4d55"
+# debug: true
+camera_name: "hikrobot"
+exposure_ms: 3
+gain: 10.0
+vid_pid: "2bdf:0001"
 
 camera_settings:
   width: 1920

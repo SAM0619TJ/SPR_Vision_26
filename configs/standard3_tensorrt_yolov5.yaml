@@ -5,8 +5,8 @@ enemy_color: "red"
 # 推理后端选择：tensorrt | openvino
 inference_backend: tensorrt
 
-# 选择YOLO模型：yolov8 | yolo11
-yolo_name: yolov8
+# 选择YOLO模型：yolov5 (RobotDetectionModel 0526.onnx, 灰度输入, detection-first输出)
+yolo_name: yolov5
 
 classify_model: assets/tiny_resnet.onnx
 
@@ -26,22 +26,15 @@ yolov8_onnx_path: /home/spr/SPR_Vision_26/assets/engines/yolov8.onnx
 yolo11_onnx_path: /home/spr/SPR_Vision_26/assets/yolo11.onnx
 yolo26_onnx_path: /home/spr/SPR_Vision_26/assets/engines/yolo26.onnx
 yolov5_onnx_path: /home/spr/SPR_Vision_26/assets/engines/0526.onnx
+yolov5_engine_path: /home/spr/SPR_Vision_26/assets/engines/0526.engine
 # TensorRT推理设备（GPU）
 device: GPU
 
 # 推理参数
-min_confidence: 0.6
+min_confidence: 0.8
 yolo_debug: false  # YOLO调试可视化与截图开关（true时可能持续写入imgs）
 use_traditional: false  # 是否启用传统方法（在神经网络基础上进行后处理）
 use_async_inference: true  # 异步推理（可提升帧率，但有1帧延迟）
-
-
-# 是否启用网页调试 (会增加额外开销，Orin上建议默认关闭)
-enable_web_debug: true
-
-# 网页调试端口
-web_debug_port: 8080
-
 
 #####-----ROI-----#####
 roi:

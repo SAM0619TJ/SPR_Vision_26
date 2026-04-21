@@ -22,7 +22,7 @@ enemy_color: "blue"
 #   - 优点: 兼容性好，支持模型多
 # ==========================================
 
-inference_backend: openvino    # 切换这里: tensorrt | openvino
+inference_backend: tensorrt   # 切换这里: tensorrt | openvino
 
 #####-----神经网络参数-----#####
 
@@ -68,19 +68,25 @@ ov_streams: 1         # OpenVINO streams 数量
 
 yolo11_engine_path: ../assets/engines/yolo11.engine
 yolov8_engine_path: ../assets/engines/yolov8_jetson_fp16.engine
-yolo26_engine_path: ../assets/engines/yolo26.engine
+yolo26_engine_path: ../assets/engines/best.engine
 
 # TensorRT ONNX 源文件 (用于构建engine)
 yolo11_onnx_path: ../assets/engines/yolo11.onnx
 yolov8_onnx_path: ../assets/engines/yolov8.onnx
-yolo26_onnx_path: ../assets/engines/yolo26.onnx
+yolo26_onnx_path: ../assets/engines/best.onnx
 
 # ==========================================
 # 推理参数 (通用)
 # ==========================================
 
 # 是否启用异步推理 (可提升帧率，但有1帧延迟)
-use_async_inference: false
+use_async_inference: true
+
+# 是否启用网页调试 (会增加额外开销，Orin上建议默认关闭)
+enable_web_debug: false
+
+# 网页调试端口
+web_debug_port: 8080
 
 # 检测置信度阈值 (0.0-1.0)
 min_confidence: 0.7
@@ -137,33 +143,45 @@ judge_distance: 2
 auto_fire: false
 
 #####-----相机配置-----#####
-camera_name: "daheng"
-exposure_ms: 2.1
-gain: 24
-vid_pid: "2ba2:4d55"
-debug: true
+camera_name: "hikrobot"
+exposure_ms: 3
+gain: 10.0
+vid_pid: "2bdf:0001"
 
-camera_settings:
-  width: 1920
-  height: 1200
-  exposure: 700
-  auto_exposure: false
-  gain: 24
-  fps: 168
-  auto_white_balance: true
-  rgain: 0.0
-  bgain: 0.0
-  ggain: 0.0
-  time_offset: 45500000
-  auto_exp_change: false
-  max_exp: 3000
-  min_exp: 200
-  pixel_format: BayerRG8
-  bayer_pattern: BayerBG8
+# camera_name: "mindvision"
+# exposure_ms: 2.0
+# gamma: 1.0
+# vid_pid: "f622:d132"
+# debug: true
 
-trigger_enable: false
-trigger_source: 2
-trigger_activation: 0
+
+# camera_name: "daheng"
+# exposure_ms: 2.1
+# gain: 24
+# vid_pid: "2ba2:4d55"
+# debug: true
+
+# camera_settings:
+#   width: 1920
+#   height: 1200
+#   exposure: 700
+#   auto_exposure: false
+#   gain: 24
+#   fps: 168
+#   auto_white_balance: true
+#   rgain: 0.0
+#   bgain: 0.0
+#   ggain: 0.0
+#   time_offset: 45500000
+#   auto_exp_change: false
+#   max_exp: 3000
+#   min_exp: 200
+#   pixel_format: BayerRG8
+#   bayer_pattern: BayerBG8
+
+# trigger_enable: false
+# trigger_source: 2
+# trigger_activation: 0
 
 #####-----相机标定参数-----#####
 R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]

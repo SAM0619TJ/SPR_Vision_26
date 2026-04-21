@@ -33,7 +33,6 @@ private:
   std::string device_;
   std::string engine_path_;
   std::string onnx_path_;
-  std::string save_path_, debug_path_;
   bool debug_, use_roi_;
   bool use_async_inference_;
   bool use_traditional_;

@@ -134,10 +134,10 @@ void HikRobot::capture_start()
       auto pixel_type = frame_info.enPixelType;
       cv::Mat dst_image;
       const static std::unordered_map<MvGvspPixelType, cv::ColorConversionCodes> type_map = {
-        {PixelType_Gvsp_BayerGR8, cv::COLOR_BayerGR2RGB},
-        {PixelType_Gvsp_BayerRG8, cv::COLOR_BayerRG2RGB},
-        {PixelType_Gvsp_BayerGB8, cv::COLOR_BayerGB2RGB},
-        {PixelType_Gvsp_BayerBG8, cv::COLOR_BayerBG2RGB}};
+        {PixelType_Gvsp_BayerGR8, cv::COLOR_BayerGR2BGR},
+        {PixelType_Gvsp_BayerRG8, cv::COLOR_BayerRG2BGR},
+        {PixelType_Gvsp_BayerGB8, cv::COLOR_BayerGB2BGR},
+        {PixelType_Gvsp_BayerBG8, cv::COLOR_BayerBG2BGR}};
       cv::cvtColor(img, dst_image, type_map.at(pixel_type));
       img = dst_image;
 

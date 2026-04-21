@@ -10,10 +10,10 @@ if(NOT DEFINED CMAKE_CUDA_COMPILER)
   find_program(CMAKE_CUDA_COMPILER
     NAMES nvcc
     PATHS
-      /usr/local/cuda-11.4/bin   # JetPack 5.x Xavier NX
-      /usr/local/cuda-11.8/bin
+      /usr/local/cuda-12.6/bin   # JetPack 6.1 Orin
       /usr/local/cuda-12/bin
       /usr/local/cuda/bin
+      /usr/local/cuda-11.4/bin   # JetPack 5.x Xavier NX (fallback)
     NO_DEFAULT_PATH
   )
 endif()
@@ -24,9 +24,8 @@ check_language(CUDA)
 if(CMAKE_CUDA_COMPILER)
   if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
-      # Xavier NX = SM 7.2 (Volta)
-      # 去掉 Orin 的 87，只保留 Xavier NX 目标，加快编译速度
-      set(CMAKE_CUDA_ARCHITECTURES "72")
+      # Orin Nano/NX/AGX = SM 8.7 (Ampere)
+      set(CMAKE_CUDA_ARCHITECTURES "87")
     else()
       set(CMAKE_CUDA_ARCHITECTURES "75;86;89")
     endif()
@@ -44,10 +43,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS true)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_BUILD_TYPE Release)
 
-# Xavier NX ARM FP16 指令集优化
+# Orin ARM Ampere 指令集优化
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=armv8.2-a+fp16 -mtune=cortex-a57")
-  message(STATUS "ARM64 optimizations enabled: -march=armv8.2-a+fp16")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=armv8.2-a+fp16 -mtune=cortex-a78ae")
+  message(STATUS "ARM64 optimizations enabled: -march=armv8.2-a+fp16 -mtune=cortex-a78ae")
 else()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native")
 endif()
@@ -81,7 +80,7 @@ else()
 endif()
 
 # ── TensorRT 查找 ─────────────────────────────────────────────────────────────
-# JetPack 5.x 的 TRT 8.5 头文件在系统路径，无需手动指定 TRT-10.0 路径
+# JetPack 6.1 (Orin): TRT 10.3，头文件在 /usr/include/aarch64-linux-gnu
 if(CUDA_FOUND)
   get_filename_component(CUDA_COMPILER_BIN "${CMAKE_CUDA_COMPILER}" DIRECTORY)
   get_filename_component(CUDA_TOOLKIT_ROOT_DIR "${CUDA_COMPILER_BIN}" DIRECTORY)
@@ -89,21 +88,21 @@ if(CUDA_FOUND)
   find_path(TensorRT_INCLUDE_DIR NvInfer.h
     HINTS
       /usr/include/${ARCH_SUFFIX}
-      /usr/local/cuda/include
       /usr/include
+      /usr/local/cuda/include
     PATH_SUFFIXES tensorrt)
 
   find_library(TensorRT_LIBRARY nvinfer
-    HINTS /usr/lib/${ARCH_SUFFIX} /usr/local/cuda/lib64 /usr/lib)
+    HINTS /usr/lib/${ARCH_SUFFIX} /usr/lib /usr/local/cuda/lib64)
   find_library(TensorRT_PLUGIN_LIBRARY nvinfer_plugin
-    HINTS /usr/lib/${ARCH_SUFFIX} /usr/local/cuda/lib64 /usr/lib)
+    HINTS /usr/lib/${ARCH_SUFFIX} /usr/lib /usr/local/cuda/lib64)
   find_library(TensorRT_ONNX_LIBRARY nvonnxparser
-    HINTS /usr/lib/${ARCH_SUFFIX} /usr/local/cuda/lib64 /usr/lib)
+    HINTS /usr/lib/${ARCH_SUFFIX} /usr/lib /usr/local/cuda/lib64)
   find_library(CUDA_RUNTIME_LIBRARY cudart
     HINTS
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64
       /usr/local/cuda/lib64
-      /usr/local/cuda-11.4/targets/${CUDA_ARCH_DIR}/lib
+      /usr/local/cuda-12.6/targets/${CUDA_ARCH_DIR}/lib
       /usr/local/cuda/targets/${CUDA_ARCH_DIR}/lib)
 
   if(TensorRT_INCLUDE_DIR AND TensorRT_LIBRARY AND TensorRT_PLUGIN_LIBRARY
@@ -126,7 +125,7 @@ if(TensorRT_FOUND)
   include_directories(${TensorRT_INCLUDE_DIR})
 endif()
 
-# ── ROS2 Foxy 可选 ────────────────────────────────────────────────────────────
+# ── ROS2 Humble 可选 ────────────────────────────────────────────────────────────
 find_package(ament_cmake QUIET)
 find_package(rclcpp QUIET)
 find_package(std_msgs QUIET)
@@ -141,17 +140,25 @@ add_subdirectory(debug)
 add_subdirectory(tasks/auto_aim)
 add_subdirectory(tasks/auto_buff)
 add_subdirectory(tasks/omniperception)
-# add_subdirectory(librm)  # librm 目录不存在，暂时禁用
 
 # ── 可执行文件 ────────────────────────────────────────────────────────────────
 add_executable(standard src/standard.cpp)
-target_link_libraries(standard fmt::fmt yaml-cpp auto_aim debug tools io ${OpenCV_LIBS})
+target_link_libraries(standard fmt::fmt yaml-cpp auto_aim vision_debug tools io ${OpenCV_LIBS})
 
-add_executable(daheng_camera_test src/daheng_camera_test.cpp)
-target_link_libraries(daheng_camera_test fmt::fmt yaml-cpp auto_aim tools io ${OpenCV_LIBS})
+add_executable(auto_aim_debug_mpc src/auto_aim_debug_mpc.cpp)
+target_link_libraries(auto_aim_debug_mpc fmt::fmt yaml-cpp auto_aim vision_debug tools io ${OpenCV_LIBS})
 
-add_executable(uav_debug_jetson src/uav_debug_jetsn.cpp)
-target_link_libraries(uav_debug_jetson fmt::fmt yaml-cpp auto_aim tools io ${OpenCV_LIBS})
+add_executable(auto_aim_orin_debug src/auto_aim_orin_debug.cpp)
+target_link_libraries(auto_aim_orin_debug fmt::fmt yaml-cpp auto_aim vision_debug tools io ${OpenCV_LIBS})
+
+add_executable(mt_auto_aim_debug src/mt_auto_aim_debug.cpp)
+target_link_libraries(mt_auto_aim_debug fmt::fmt yaml-cpp auto_aim vision_debug tools io ${OpenCV_LIBS})
+
+# add_executable(auto_buff_debug_mpc src/auto_buff_debug_mpc.cpp)
+# target_link_libraries(auto_buff_debug_mpc fmt::fmt yaml-cpp auto_aim vision_debug tools io ${OpenCV_LIBS})
+
+# add_executable(uav_debug_jetson src/uav_debug_jetsn.cpp)
+# target_link_libraries(uav_debug_jetson fmt::fmt yaml-cpp auto_aim tools io ${OpenCV_LIBS})
 
 # ── 标定工具 ──────────────────────────────────────────────────────────────────
 add_executable(capture calibration/capture.cpp)
@@ -165,10 +172,13 @@ target_link_libraries(calibrate_handeye fmt::fmt yaml-cpp tools ${OpenCV_LIBS})
 
 # ── 测试 ──────────────────────────────────────────────────────────────────────
 add_executable(auto_aim_test tests/auto_aim_test.cpp)
-target_link_libraries(auto_aim_test fmt::fmt yaml-cpp tools io auto_aim ${OpenCV_LIBS})
+target_link_libraries(auto_aim_test fmt::fmt yaml-cpp tools io auto_aim vision_debug ${OpenCV_LIBS})
 
 add_executable(camera_detect_test tests/camera_detect_test.cpp)
 target_link_libraries(camera_detect_test fmt::fmt yaml-cpp tools auto_aim io ${OpenCV_LIBS})
+
+add_executable(camera_test tests/camera_test.cpp)
+target_link_libraries(camera_test fmt::fmt yaml-cpp tools auto_aim io ${OpenCV_LIBS})
 
 add_executable(camera_pnp_test tests/camera_pnp_test.cpp)
 target_link_libraries(camera_pnp_test fmt::fmt yaml-cpp tools auto_aim io ${OpenCV_LIBS})

@@ -1,6 +1,9 @@
 #include "cuda_preprocess.hpp"
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
+// JetPack 6.1 (CUDA 12.6) Thrust 原生支持 C++17，无需抑制宏
+#define THRUST_IGNORE_DEPRECATED_CPP_DIALECT
+#define CUB_IGNORE_DEPRECATED_CPP_DIALECT
 #include <thrust/device_vector.h>
 #include <thrust/sort.h>
 #include <thrust/execution_policy.h>
@@ -189,6 +192,77 @@ __global__ void filter_and_compact_kernel(
         confidences[out_idx] = max_prob;
         indices[out_idx] = idx;
     }
+}
+
+/**
+ * CUDA kernel: resize + letterbox + BGR→Gray + normalize → NCHW单通道
+ */
+__global__ void preprocess_gray_kernel(
+    const unsigned char* src,
+    int src_width,
+    int src_height,
+    float* dst,
+    int dst_width,
+    int dst_height,
+    float scale,
+    int pad_x,
+    int pad_y)
+{
+    int dst_x = blockIdx.x * blockDim.x + threadIdx.x;
+    int dst_y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (dst_x >= dst_width || dst_y >= dst_height) return;
+
+    int resized_x = dst_x - pad_x;
+    int resized_y = dst_y - pad_y;
+    int resized_width  = static_cast<int>(src_width  * scale);
+    int resized_height = static_cast<int>(src_height * scale);
+
+    int dst_idx = dst_y * dst_width + dst_x;
+
+    if (resized_x < 0 || resized_x >= resized_width ||
+        resized_y < 0 || resized_y >= resized_height) {
+        dst[dst_idx] = 0.0f;
+        return;
+    }
+
+    int src_x = min(max(static_cast<int>(resized_x / scale), 0), src_width  - 1);
+    int src_y = min(max(static_cast<int>(resized_y / scale), 0), src_height - 1);
+
+    int src_idx = (src_y * src_width + src_x) * 3;
+    unsigned char b = src[src_idx + 0];
+    unsigned char g = src[src_idx + 1];
+    unsigned char r = src[src_idx + 2];
+
+    // BT.601 luminance weights
+    dst[dst_idx] = (0.114f * b + 0.587f * g + 0.299f * r) / 255.0f;
+}
+
+void cuda_preprocess_letterbox_gray(
+    const unsigned char* src_device,
+    int src_width,
+    int src_height,
+    float* dst_device,
+    int dst_width,
+    int dst_height,
+    cudaStream_t stream)
+{
+    float scale = fminf(
+        static_cast<float>(dst_width)  / src_width,
+        static_cast<float>(dst_height) / src_height);
+
+    int pad_x = (dst_width  - static_cast<int>(src_width  * scale)) / 2;
+    int pad_y = (dst_height - static_cast<int>(src_height * scale)) / 2;
+
+    dim3 block(16, 16);
+    dim3 grid(
+        (dst_width  + block.x - 1) / block.x,
+        (dst_height + block.y - 1) / block.y);
+
+    preprocess_gray_kernel<<<grid, block, 0, stream>>>(
+        src_device, src_width, src_height,
+        dst_device, dst_width, dst_height,
+        scale, pad_x, pad_y);
 }
 
 /**

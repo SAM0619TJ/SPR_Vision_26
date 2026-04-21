@@ -10,7 +10,17 @@ namespace multithread
 CommandGener::CommandGener(
   auto_aim::Shooter & shooter, auto_aim::Aimer & aimer, io::CBoard & cboard,
   tools::Plotter & plotter, bool debug)
-: shooter_(shooter), aimer_(aimer), cboard_(cboard), plotter_(plotter), stop_(false), debug_(debug)
+: cboard_(&cboard), gimbal_(nullptr), shooter_(shooter), aimer_(aimer), plotter_(plotter),
+  stop_(false), debug_(debug)
+{
+  thread_ = std::thread(&CommandGener::generate_command, this);
+}
+
+CommandGener::CommandGener(
+  auto_aim::Shooter & shooter, auto_aim::Aimer & aimer, io::Gimbal & gimbal,
+  tools::Plotter & plotter, bool debug)
+: cboard_(nullptr), gimbal_(&gimbal), shooter_(shooter), aimer_(aimer), plotter_(plotter),
+  stop_(false), debug_(debug)
 {
   thread_ = std::thread(&CommandGener::generate_command, this);
 }
@@ -54,7 +64,12 @@ void CommandGener::generate_command()
                                    : std::sqrt(
                                        tools::square(input->targets_.front().ekf_x()[0]) +
                                        tools::square(input->targets_.front().ekf_x()[2]));
-      cboard_.send(command);
+      if (gimbal_ != nullptr) {
+        gimbal_->send(command.control, command.shoot, static_cast<float>(command.yaw), 0.f, 0.f,
+                      static_cast<float>(command.pitch), 0.f, 0.f);
+      } else if (cboard_ != nullptr) {
+        cboard_->send(command);
+      }
       if (debug_) {
         nlohmann::json data;
         data["t"] = tools::delta_time(std::chrono::steady_clock::now(), t0);

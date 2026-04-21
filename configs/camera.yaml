@@ -15,6 +15,7 @@ device: CPU
 # 分类器最小置信度（剔除非装甲板）；建议0.6~0.8先行验证
 min_confidence: 0.8
 # 仅 yolov5 使用：是否启用传统角点微调（二次矫正）
+
 use_traditional: true
 
 #####-----功能开关-----#####
@@ -81,12 +82,15 @@ judge_distance: 2 #距离判断阈值
 auto_fire: true # 是否由自瞄控制射击
 
 #####-----大恒相机配置-----#####
-camera_name: "daheng"
-exposure_ms: 2.1
-gain: 24
-vid_pid: "2ba2:4d55"
-
-debug: true
+# camera_name: "mindvision"
+# exposure_ms: 2.0
+# gamma: 1.0
+# vid_pid: "f622:d132"
+camera_name: "hikrobot"
+exposure_ms: 3
+gain: 10.0
+vid_pid: "2bdf:0001"
+yolo_debug: true
 
 R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
 

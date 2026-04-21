@@ -7,7 +7,9 @@
 #include <thread>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
+#include <yaml-cpp/yaml.h>
 
+#include "debug/web_debugger.hpp"
 #include "io/camera.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/solver.hpp"
@@ -103,6 +105,11 @@ int main(int argc, char * argv[])
     return -1;
   }
 
+  auto yaml = YAML::LoadFile(config_path);
+  const bool yolo_debug = yaml["yolo_debug"].as<bool>(false);
+  const bool enable_web_debug = yaml["enable_web_debug"].as<bool>(false);
+  const int web_debug_port = yaml["web_debug_port"].as<int>(8080);
+
   tools::Plotter plotter;
   tools::Exiter exiter;
 
@@ -140,10 +147,17 @@ int main(int argc, char * argv[])
     }
   }
 
-  auto_aim::YOLO yolo(config_path);  // 关闭debug模式
+  auto_aim::YOLO yolo(config_path, yolo_debug);
   auto_aim::Solver solver(config_path);
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Aimer aimer(config_path);
+
+  // 初始化 Web 调试器（可通过配置关闭）
+  std::unique_ptr<debug::WebDebugger> debugger;
+  if (enable_web_debug) {
+    debugger = std::make_unique<debug::WebDebugger>(web_debug_port);
+    debugger->start();
+  }
 
 #ifdef AMENT_CMAKE_FOUND
   // 发布静态TF: gimbal -> camera（使用标定参数）
@@ -440,6 +454,32 @@ int main(int argc, char * argv[])
     // 相机输出为 RGB 格式，imshow 需要 BGR 格式，进行转换
     cv::Mat img_bgr;
     cv::cvtColor(img, img_bgr, cv::COLOR_RGB2BGR);
+
+    // 收集推送到 WebDebugger 的数据
+    {
+      std::vector<debug::DetectionData> web_dets;
+      std::vector<debug::ReprojectionData> web_reprojs;
+      for (const auto & armor : armors) {
+        debug::DetectionData d;
+        d.pts = armor.points;
+        d.color = static_cast<int>(armor.color);
+        d.number = static_cast<int>(armor.name);
+        d.conf = armor.confidence;
+        web_dets.push_back(d);
+
+        auto reproject_opt = solver.reproject_armor(
+          armor.xyz_in_world, armor.ypr_in_world[0], armor.type, armor.name);
+        debug::ReprojectionData r;
+        r.pts = reproject_opt;
+        web_reprojs.push_back(r);
+      }
+      
+      double latency = tools::delta_time(std::chrono::steady_clock::now(), yolo_start) * 1000.0;
+      if (debugger) {
+        debugger->push(img_bgr, web_dets, web_reprojs, latency);
+      }
+    }
+
     cv::imshow("rejection", img_bgr);
     auto key = cv::waitKey(1);  
     // if (key == 'q') break;

@@ -1,5 +1,6 @@
 #include <fmt/core.h>
 #include <chrono>
+#include <string>
 #include <thread>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
@@ -83,47 +84,25 @@ int main(int argc, char * argv[])
   // 性能分析计时器
   std::chrono::steady_clock::time_point t_start, t_end;
 
-  // 🆕 同步匹配相关变量（需要在循环外声明，以便后续日志使用）
-  uint64_t frame_id = 0;
-  uint64_t frame_id_last =0;
-  int64_t trigger_imu_count = 0;
-
   while (!exiter.exit()) {
     camera.read(img, t);
 
-      // ==================== 基于 count 硬同步（使用环形数组） ====================
-      // 核心思想：相机由MCU硬触发,每来一帧图像，IMU计数器+10
-      static const int64_t frame_id_to_imu_offset = 0;  // 🔧 手动调试参数
-
-      static bool first_frame = true;
-
-      frame_id = camera.get_last_frame_id();  // 获取相机帧号
-      if(frame_id-frame_id_last!=0){
-      trigger_imu_count = 0;
-      if (trigger_imu_count < 0) trigger_imu_count += 10000;
-      //使用环形数组O(1)查询IMU数据
-      auto imu_result = cboard.get_imu_from_ring_buffer(0);
-
-      if (imu_result.valid) {
-        // 环形数组查询成功
-        q = imu_result.q;  // 四元数
-        t = imu_result.timestamp;
-        std::cout<<q<<std::endl;
+    // 从 CBoard 获取最新 IMU 数据
+    auto imu_result = cboard.get_imu_from_ring_buffer(0);
+    if (imu_result.valid) {
+      q = imu_result.q;
+      t = imu_result.timestamp;
 
 #ifdef AMENT_CMAKE_FOUND
-        // 发布动态TF: world -> gimbal（使用MCU四元数）
-        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-          t.time_since_epoch()).count();
-        rclcpp::Time ros_time(ns);
-        Eigen::Vector3d zero_trans(0, 0, 0);  // world和gimbal原点重合
-        visualizer->publish_dynamic_tf("world", "gimbal", q, zero_trans, ros_time);
+      auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        t.time_since_epoch()).count();
+      rclcpp::Time ros_time(ns);
+      Eigen::Vector3d zero_trans(0, 0, 0);
+      visualizer->publish_dynamic_tf("world", "gimbal", q, zero_trans, ros_time);
 #endif
-      } else {
+    }
 
-      }
     mode = cboard.mode;
-    frame_id_last=frame_id;
-     }
     if (last_mode != mode) {
       tools::logger()->info("Switch to {}", io::MODES[mode]);
       last_mode = mode;
@@ -170,10 +149,7 @@ int main(int argc, char * argv[])
     cboard.send(command);
     
     cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
-    // 相机输出为 RGB 格式，imshow 需要 BGR 格式
-    cv::Mat img_bgr;
-    cv::cvtColor(img, img_bgr, cv::COLOR_RGB2BGR);
-    cv::imshow("reprojection", img_bgr);
+    cv::imshow("reprojection", img);
     auto key = cv::waitKey(1);  
     if (key == 'q') break;
   }
