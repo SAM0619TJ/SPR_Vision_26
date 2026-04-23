@@ -22,11 +22,10 @@
 using namespace std::chrono_literals;
 
 const std::string keys =
-  "{help h usage ? |                        | 输出命令行参数说明}"
-  "{@config-path   | configs/sentry.yaml | 位置参数，yaml配置文件路径 }";
+    "{help h usage ? |                        | 输出命令行参数说明}"
+    "{@config-path   | configs/standard3_tensorrt.yaml| 位置参数，yaml配置文件路径 }";
 
-int main(int argc, char * argv[])
-{
+int main(int argc, char *argv[]) {
   tools::Exiter exiter;
   tools::Plotter plotter;
 
@@ -40,7 +39,7 @@ int main(int argc, char * argv[])
   io::Gimbal gimbal(config_path);
   io::Camera camera(config_path);
 
-  auto_aim::YOLO yolo(config_path, true);
+  auto_aim::YOLO yolo(config_path, false);
   auto_aim::Solver solver(config_path);
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Planner planner(config_path);
@@ -57,15 +56,16 @@ int main(int argc, char * argv[])
       auto t_front_start = std::chrono::steady_clock::now();
       auto target = target_queue.front();
       auto t_front_end = std::chrono::steady_clock::now();
-      double front_ms = std::chrono::duration<double, std::milli>(t_front_end - t_front_start).count();
+      double front_ms =
+          std::chrono::duration<double, std::milli>(t_front_end - t_front_start)
+              .count();
       if (front_ms > 5.0)
         tools::logger()->warn("[plan] front() blocked {:.1f}ms", front_ms);
       auto gs = gimbal.state();
       auto plan = planner.plan(target, gs.bullet_speed);
 
-      gimbal.send(
-        plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
-        plan.pitch_acc);
+      gimbal.send(plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc,
+                  plan.pitch, plan.pitch_vel, plan.pitch_acc);
 
       auto fired = gs.bullet_count > last_bullet_count;
       last_bullet_count = gs.bullet_count;
@@ -93,8 +93,8 @@ int main(int argc, char * argv[])
       data["fired"] = fired ? 1 : 0;
 
       if (target.has_value()) {
-        data["target_z"] = target->ekf_x()[4];   //z
-        data["target_vz"] = target->ekf_x()[5];  //vz
+        data["target_z"] = target->ekf_x()[4];  // z
+        data["target_vz"] = target->ekf_x()[5]; // vz
       }
 
       if (target.has_value()) {
@@ -111,6 +111,7 @@ int main(int argc, char * argv[])
 
   cv::Mat img;
   std::chrono::steady_clock::time_point t;
+  int frame_count = 0;
 
   while (!exiter.exit()) {
     auto t_frame_start = std::chrono::steady_clock::now();
@@ -121,7 +122,7 @@ int main(int argc, char * argv[])
     solver.set_R_gimbal2world(q);
 
     auto t_detect_start = std::chrono::steady_clock::now();
-    auto armors = yolo.detect(img);
+    auto armors = yolo.detect(img, frame_count);
     auto t_detect_end = std::chrono::steady_clock::now();
 
     auto targets = tracker.track(armors, t);
@@ -133,11 +134,17 @@ int main(int argc, char * argv[])
       target_queue.push(std::nullopt);
     auto t_push_end = std::chrono::steady_clock::now();
 
-    double detect_ms = std::chrono::duration<double, std::milli>(t_detect_end - t_detect_start).count();
-    double push_ms   = std::chrono::duration<double, std::milli>(t_push_end - t_push_start).count();
-    double frame_ms  = std::chrono::duration<double, std::milli>(t_push_end - t_frame_start).count();
-    tools::logger()->info("[main] detect={:.1f}ms push_wait={:.1f}ms frame={:.1f}ms",
-      detect_ms, push_ms, frame_ms);
+    double detect_ms =
+        std::chrono::duration<double, std::milli>(t_detect_end - t_detect_start)
+            .count();
+    double push_ms =
+        std::chrono::duration<double, std::milli>(t_push_end - t_push_start)
+            .count();
+    double frame_ms =
+        std::chrono::duration<double, std::milli>(t_push_end - t_frame_start)
+            .count();
+    // tools::logger()->info("[main] detect={:.1f}ms push_wait={:.1f}ms
+    // frame={:.1f}ms",detect_ms, push_ms, frame_ms);
 
     cv::Mat display;
     cv::cvtColor(img, display, cv::COLOR_RGB2BGR);
@@ -146,26 +153,30 @@ int main(int argc, char * argv[])
       auto target = targets.front();
 
       std::vector<Eigen::Vector4d> armor_xyza_list = target.armor_xyza_list();
-      for (const Eigen::Vector4d & xyza : armor_xyza_list) {
-        auto image_points =
-          solver.reproject_armor(xyza.head(3), xyza[3], target.armor_type, target.name);
+      for (const Eigen::Vector4d &xyza : armor_xyza_list) {
+        auto image_points = solver.reproject_armor(
+            xyza.head(3), xyza[3], target.armor_type, target.name);
         tools::draw_points(display, image_points, {0, 255, 0});
       }
 
       Eigen::Vector4d aim_xyza = planner.debug_xyza;
-      auto image_points =
-        solver.reproject_armor(aim_xyza.head(3), aim_xyza[3], target.armor_type, target.name);
+      auto image_points = solver.reproject_armor(
+          aim_xyza.head(3), aim_xyza[3], target.armor_type, target.name);
       tools::draw_points(display, image_points, {0, 0, 255});
     }
 
     cv::resize(display, display, {}, 0.5, 0.5);
     cv::imshow("reprojection", display);
     auto key = cv::waitKey(1);
-    if (key == 'q') break;
+    if (key == 'q')
+      break;
+
+    ++frame_count;
   }
 
   quit = true;
-  if (plan_thread.joinable()) plan_thread.join();
+  if (plan_thread.joinable())
+    plan_thread.join();
   gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
 
   return 0;

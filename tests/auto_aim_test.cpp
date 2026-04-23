@@ -29,7 +29,7 @@
 
 const std::string keys =
   "{help h usage ? |                              | 输出命令行参数说明 }"
-  "{config-path c  | ../configs/vtune_test.yaml   | yaml配置文件的路径（相对于build目录）}"
+  "{config-path c  | ../configs/standard3_tensorrt.yaml   | yaml配置文件的路径（相对于build目录）}"
   "{use-camera     | true                         | 使用真实相机而非视频文件（默认启用）}"
   "{start-index s  | 0                            | 视频起始帧下标    }"
   "{end-index e    | 0                            | 视频结束帧下标    }"
