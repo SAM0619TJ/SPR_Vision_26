@@ -14,6 +14,12 @@ yolov5_model_path: assets/yolov5.xml        # yolo_name: yolov5 时使用（输�
 device: CPU
 # 分类器最小置信度（剔除非装甲板）；建议0.6~0.8先行验证
 min_confidence: 0.8
+# 是否启用网页调试
+enable_web_debug: true
+# 网页调试端口
+web_debug_port: 8080
+# 是否启用 OpenCV 窗口显示（SSH/无桌面环境建议关闭）
+enable_imshow: false
 # 仅 yolov5 使用：是否启用传统角点微调（二次矫正）
 
 use_traditional: true

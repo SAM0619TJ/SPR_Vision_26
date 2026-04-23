@@ -1,5 +1,5 @@
-enemy_color: "red"
-# enemy_color: "blue"
+# enemy_color: "red"
+enemy_color: "blue"
 
 #####-----神经网络参数-----#####
 # 推理后端选择：tensorrt | openvino
@@ -30,8 +30,8 @@ yolov5_onnx_path: /home/spr/SPR_Vision_26/assets/engines/0526.onnx
 device: GPU
 
 # 推理参数
-min_confidence: 0.6
-yolo_debug: false  # YOLO调试可视化与截图开关（true时可能持续写入imgs）
+min_confidence: 0.8
+yolo_debug: false # YOLO调试可视化与截图开关（true时可能持续写入imgs）
 use_traditional: false  # 是否启用传统方法（在神经网络基础上进行后处理）
 use_async_inference: true  # 异步推理（可提升帧率，但有1帧延迟）
 
@@ -41,6 +41,9 @@ enable_web_debug: true
 
 # 网页调试端口
 web_debug_port: 8080
+
+# 是否启用 OpenCV 窗口显示（SSH/无桌面环境建议关闭）
+enable_imshow: false
 
 
 #####-----ROI-----#####
@@ -69,13 +72,13 @@ max_temp_lost_count: 15
 outpost_max_temp_lost_count: 75
 
 #####-----aimer参数-----#####
-yaw_offset: 2 # degree -2.5
-pitch_offset: 6.5 # degree 2
+yaw_offset: 0 # degree -2.5
+pitch_offset: 0 # degree 2
 comming_angle: 55 # degree
 leaving_angle: 20 # degree
 decision_speed: 7 # rad/s
-high_speed_delay_time: 0.0 # s
-low_speed_delay_time: 0.0 # s planner use this value
+high_speed_delay_time: 0.08 # s
+low_speed_delay_time: 0.1 # s planner use this value
 
 #####-----shooter参数-----#####
 first_tolerance: 3 # 近距离射击容差，degree
@@ -86,7 +89,7 @@ auto_fire: true # 是否由自瞄控制射击
 #####-----相机配置-----#####
 camera_name: "hikrobot"
 exposure_ms: 2.5
-gain: 10.0
+gain: 16.0
 vid_pid: "2bdf:0001"
 # camera_name: "mindvision"
 # exposure_ms: 2.0
@@ -108,14 +111,22 @@ pitch_kd: 0
 R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
 
 # 重投影误差: 0.1820px
-camera_matrix: [1785.4881526822305, 0, 672.4806478241826, 0, 1785.026019470562, 559.89603224794314, 0, 0, 1]
-distort_coeffs: [-0.076005079619881746, 0.11182817466388446, 0.0005362204787722057, -0.0027546300984895122, 0]
+# camera_matrix: [1785.4881526822305, 0, 672.4806478241826, 0, 1785.026019470562, 559.89603224794314, 0, 0, 1]
+# distort_coeffs: [-0.076005079619881746, 0.11182817466388446, 0.0005362204787722057, -0.0027546300984895122, 0]
 
-# 相机同理想情况的偏角: yaw1.44 pitch-7.28 roll0.96 degree
-# 标定板到世界坐标系原点的水平距离: 1.13 m
-# 标定板同竖直摆放时的偏角: yaw7.61 pitch13.92 roll-0.46 degree
-R_camera2gimbal: [-0.027182119030230909, -0.12616154330853446, 0.99163723074269183, -0.99949106557517331, 0.019998323121329122, -0.024853106601381177, -0.016695575474690555, -0.99180811252093692, -0.12664093215554434]
-t_camera2gimbal: [0.13160669975045827, 0.10377721766577375, 0.024908271912914642]
+# # 相机同理想情况的偏角: yaw1.44 pitch-7.28 roll0.96 degree
+# # 标定板到世界坐标系原点的水平距离: 1.13 m
+# # 标定板同竖直摆放时的偏角: yaw7.61 pitch13.92 roll-0.46 degree
+# R_camera2gimbal: [-0.027182119030230909, -0.12616154330853446, 0.99163723074269183, -0.99949106557517331, 0.019998323121329122, -0.024853106601381177, -0.016695575474690555, -0.99180811252093692, -0.12664093215554434]
+# t_camera2gimbal: [0.13160669975045827, 0.10377721766577375, 0.024908271912914642]
+# 重投影误差: 0.1283px
+camera_matrix: [2405.2383864377525, 0, 719.1089470909925, 0, 2403.5790895626374, 562.29551387418564, 0, 0, 1]
+distort_coeffs: [-0.026661205848656149, 0.1576357135322369, -0.00038445208738622529, 0.00015080298483983665, 0]
+# 相机同理想情况的偏角: yaw-1.37 pitch-0.00 roll0.07 degree
+# 标定板到世界坐标系原点的水平距离: 1.48 m
+# 标定板同竖直摆放时的偏角: yaw160.78 pitch-2.14 roll90.39 degree
+R_camera2gimbal: [0.023983001513958054, -8.20368612595831e-05, 0.99971236308667055, -0.99971165426405295, 0.0011916761626127859, 0.023983082298872877, -0.0011933008893547487, -0.99999928658868409, -5.3433235068305914e-05]
+t_camera2gimbal: [0.15432862989955437, -0.044144795673841428, 0.048934941995976422]
 
 #####-----cboard参数-----#####
 quaternion_canid: 0x100

@@ -88,6 +88,9 @@ enable_web_debug: false
 # 网页调试端口
 web_debug_port: 8080
 
+# 是否启用 OpenCV 窗口显示（SSH/无桌面环境建议关闭）
+enable_imshow: false
+
 # 检测置信度阈值 (0.0-1.0)
 min_confidence: 0.7
 
