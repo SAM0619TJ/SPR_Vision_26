@@ -2,10 +2,13 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
 #include <thread>
+#include <yaml-cpp/yaml.h>
 
+#include "debug/web_debugger.hpp"
 #include "io/camera.hpp"
 #include "io/gimbal/gimbal.hpp"
 #include "tasks/auto_aim/planner/planner.hpp"
@@ -36,13 +39,37 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
+  auto yaml = YAML::LoadFile(config_path);
+  plotter.configure(config_path);
+  const bool display_requested = yaml["enable_imshow"].as<bool>(false);
+  const bool enable_web_debug = yaml["enable_web_debug"].as<bool>(false);
+  const int web_debug_port = yaml["web_debug_port"].as<int>(8080);
+  const bool has_display =
+      std::getenv("DISPLAY") != nullptr || std::getenv("WAYLAND_DISPLAY") != nullptr;
+  const bool enable_imshow = display_requested && has_display;
+  const bool yolo_debug = yaml["yolo_debug"].as<bool>(false) && enable_imshow;
+
+  if (display_requested && !has_display) {
+    tools::logger()->warn(
+        "enable_imshow=true but no display detected, disabling imshow for headless run.");
+  }
+  if (yaml["yolo_debug"].as<bool>(false) && !enable_imshow) {
+    tools::logger()->warn(
+        "yolo_debug requested but imshow is disabled, forcing yolo_debug=false.");
+  }
+
   io::Gimbal gimbal(config_path);
   io::Camera camera(config_path);
 
-  auto_aim::YOLO yolo(config_path, false);
+  auto_aim::YOLO yolo(config_path, yolo_debug);
   auto_aim::Solver solver(config_path);
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Planner planner(config_path);
+  std::unique_ptr<debug::WebDebugger> debugger;
+  if (enable_web_debug) {
+    debugger = std::make_unique<debug::WebDebugger>(web_debug_port);
+    debugger->start();
+  }
 
   tools::ThreadSafeQueue<std::optional<auto_aim::Target>, true> target_queue(1);
   target_queue.push(std::nullopt);
@@ -147,7 +174,9 @@ int main(int argc, char *argv[]) {
     // frame={:.1f}ms",detect_ms, push_ms, frame_ms);
 
     cv::Mat display;
-    cv::cvtColor(img, display, cv::COLOR_RGB2BGR);
+    if (enable_imshow || debugger) {
+      cv::cvtColor(img, display, cv::COLOR_RGB2BGR);
+    }
 
     if (!targets.empty()) {
       auto target = targets.front();
@@ -165,11 +194,36 @@ int main(int argc, char *argv[]) {
       tools::draw_points(display, image_points, {0, 0, 255});
     }
 
-    cv::resize(display, display, {}, 0.5, 0.5);
-    cv::imshow("reprojection", display);
-    auto key = cv::waitKey(1);
-    if (key == 'q')
-      break;
+    if (enable_imshow) {
+      cv::resize(display, display, {}, 0.5, 0.5);
+      cv::imshow("reprojection", display);
+      auto key = cv::waitKey(1);
+      if (key == 'q')
+        break;
+    }
+
+    if (debugger) {
+      std::vector<debug::DetectionData> web_dets;
+      std::vector<debug::ReprojectionData> web_reprojs;
+      for (const auto &armor : armors) {
+        debug::DetectionData d;
+        d.pts = armor.points;
+        d.color = static_cast<int>(armor.color);
+        d.number = static_cast<int>(armor.name);
+        d.conf = armor.confidence;
+        web_dets.push_back(d);
+      }
+      if (!targets.empty()) {
+        auto target = targets.front();
+        for (const Eigen::Vector4d &xyza : target.armor_xyza_list()) {
+          debug::ReprojectionData r;
+          r.pts = solver.reproject_armor(
+              xyza.head(3), xyza[3], target.armor_type, target.name);
+          web_reprojs.push_back(r);
+        }
+      }
+      debugger->push(display, web_dets, web_reprojs, frame_ms);
+    }
 
     ++frame_count;
   }

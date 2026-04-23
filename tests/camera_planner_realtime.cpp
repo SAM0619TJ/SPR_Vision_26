@@ -1,8 +1,11 @@
 #include <fmt/core.h>
 #include <chrono>
+#include <cstdlib>
 #include <opencv2/opencv.hpp>
 #include <thread>
+#include <yaml-cpp/yaml.h>
 
+#include "debug/web_debugger.hpp"
 #include "io/camera.hpp"
 #include "tasks/auto_aim/detector.hpp"
 #include "tasks/auto_aim/yolo.hpp"
@@ -30,11 +33,35 @@ int main(int argc, char * argv[])
   }
 
   tools::Exiter exiter;
+  auto yaml = YAML::LoadFile(config_path);
+  const bool display_requested = yaml["enable_imshow"].as<bool>(false);
+  const bool enable_web_debug = yaml["enable_web_debug"].as<bool>(false);
+  const int web_debug_port = yaml["web_debug_port"].as<int>(8080);
+  const bool has_display =
+    std::getenv("DISPLAY") != nullptr || std::getenv("WAYLAND_DISPLAY") != nullptr;
+  const bool enable_imshow = display_requested && has_display;
+  const bool yolo_debug = yaml["yolo_debug"].as<bool>(false) && enable_imshow;
+
+  if (display_requested && !has_display) {
+    tools::logger()->warn(
+      "enable_imshow=true but no display detected, disabling imshow for headless run.");
+  }
+  if (yaml["yolo_debug"].as<bool>(false) && !enable_imshow) {
+    tools::logger()->warn(
+      "yolo_debug requested but imshow is disabled, forcing yolo_debug=false.");
+  }
+
   io::Camera camera(config_path);
   auto_aim::Detector detector(config_path);
-  auto_aim::YOLO yolo(config_path, true);
+  auto_aim::YOLO yolo(config_path, yolo_debug);
   auto_aim::Solver solver(config_path);
   auto_aim::Planner planner(config_path);
+  std::unique_ptr<debug::WebDebugger> debugger;
+  if (enable_web_debug) {
+    debugger = std::make_unique<debug::WebDebugger>(web_debug_port);
+    debugger->start();
+    tools::logger()->info("Web debugger enabled on port {}", web_debug_port);
+  }
 
   std::chrono::steady_clock::time_point timestamp;
   int frame_count = 0;
@@ -45,6 +72,7 @@ int main(int argc, char * argv[])
   while (!exiter.exit()) {
     cv::Mat img, display_img;
     std::list<auto_aim::Armor> armors;
+    std::vector<debug::ReprojectionData> web_reprojs;
 
     camera.read(img, timestamp);
 
@@ -149,6 +177,11 @@ int main(int argc, char * argv[])
         tools::draw_text(display_img, distance_label,
                          {(int)valid_armor->center_norm.x - 20, (int)valid_armor->center_norm.y - 20},
                          {0, 255, 0});
+
+        debug::ReprojectionData r;
+        r.pts = solver.reproject_armor(
+          valid_armor->xyz_in_world, valid_armor->ypr_in_world[0], valid_armor->type, valid_armor->name);
+        web_reprojs.push_back(r);
       }
     } else {
       // 没有检测到装甲板
@@ -172,19 +205,43 @@ int main(int argc, char * argv[])
       }
     }
 
-    cv::imshow("Camera + Planner Real-time Test", display_img);
+    cv::Mat display_bgr;
+    if (enable_imshow || debugger) {
+      cv::cvtColor(display_img, display_bgr, cv::COLOR_RGB2BGR);
+    }
+
+    if (debugger) {
+      std::vector<debug::DetectionData> web_dets;
+      for (const auto &armor : armors) {
+        debug::DetectionData d;
+        d.pts = armor.points;
+        d.color = static_cast<int>(armor.color);
+        d.number = static_cast<int>(armor.name);
+        d.conf = armor.confidence;
+        web_dets.push_back(d);
+      }
+      debugger->push(display_bgr, web_dets, web_reprojs, detection_time * 1000.0);
+    }
+
+    if (enable_imshow) {
+      cv::imshow("Camera + Planner Real-time Test", display_bgr);
+    }
 
     // 检查退出条件
-    char key = cv::waitKey(1);
-    if (key == 'q' || key == 27) {
-      tools::logger()->info("User requested exit");
-      break;
+    if (enable_imshow) {
+      char key = cv::waitKey(1);
+      if (key == 'q' || key == 27) {
+        tools::logger()->info("User requested exit");
+        break;
+      }
     }
   }
 
   tools::logger()->info("Camera + planner test completed");
   tools::logger()->info("Total frames processed: {}", frame_count);
 
-  cv::destroyAllWindows();
+  if (enable_imshow) {
+    cv::destroyAllWindows();
+  }
   return 0;
 }

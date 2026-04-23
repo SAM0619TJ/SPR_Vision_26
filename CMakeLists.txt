@@ -42,6 +42,7 @@ endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS true)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_BUILD_TYPE Release)
+option(ENABLE_ROS2 "Build ROS2-related components" OFF)
 
 # Orin ARM Ampere 指令集优化
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
@@ -126,12 +127,16 @@ if(TensorRT_FOUND)
 endif()
 
 # ── ROS2 Humble 可选 ────────────────────────────────────────────────────────────
-find_package(ament_cmake QUIET)
-find_package(rclcpp QUIET)
-find_package(std_msgs QUIET)
-find_package(visualization_msgs QUIET)
-find_package(tf2_ros QUIET)
-find_package(geometry_msgs QUIET)
+if(ENABLE_ROS2)
+  find_package(ament_cmake QUIET)
+  find_package(rclcpp QUIET)
+  find_package(std_msgs QUIET)
+  find_package(visualization_msgs QUIET)
+  find_package(tf2_ros QUIET)
+  find_package(geometry_msgs QUIET)
+else()
+  message(STATUS "ROS2 disabled by ENABLE_ROS2=OFF")
+endif()
 
 # ── 子目录 ────────────────────────────────────────────────────────────────────
 add_subdirectory(tools)
@@ -170,6 +175,9 @@ target_link_libraries(calibrate_camera fmt::fmt yaml-cpp tools ${OpenCV_LIBS})
 add_executable(calibrate_handeye calibration/calibrate_handeye.cpp)
 target_link_libraries(calibrate_handeye fmt::fmt yaml-cpp tools ${OpenCV_LIBS})
 
+add_executable(calibrate_robotworld_handeye calibration/calibrate_robotworld_handeye.cpp)
+target_link_libraries(calibrate_robotworld_handeye fmt::fmt yaml-cpp tools ${OpenCV_LIBS})
+
 # ── 测试 ──────────────────────────────────────────────────────────────────────
 add_executable(auto_aim_test tests/auto_aim_test.cpp)
 target_link_libraries(auto_aim_test fmt::fmt yaml-cpp tools io auto_aim vision_debug ${OpenCV_LIBS})
@@ -193,10 +201,10 @@ add_executable(planner_test_offline tests/planner_test_offline.cpp)
 target_link_libraries(planner_test_offline fmt::fmt yaml-cpp auto_aim tools io ${OpenCV_LIBS})
 
 add_executable(camera_planner_realtime tests/camera_planner_realtime.cpp)
-target_link_libraries(camera_planner_realtime fmt::fmt yaml-cpp auto_aim tools io ${OpenCV_LIBS})
+target_link_libraries(camera_planner_realtime fmt::fmt yaml-cpp auto_aim vision_debug tools io ${OpenCV_LIBS})
 
 # ── ROS2 Foxy 可选编译 ────────────────────────────────────────────────────────
-if(ament_cmake_FOUND AND rclcpp_FOUND AND std_msgs_FOUND
+if(ENABLE_ROS2 AND ament_cmake_FOUND AND rclcpp_FOUND AND std_msgs_FOUND
    AND visualization_msgs_FOUND AND tf2_ros_FOUND AND geometry_msgs_FOUND)
   message(STATUS "ROS2 Foxy found, compiling standard_ros2")
   add_executable(standard_ros2 src/standard.cpp)

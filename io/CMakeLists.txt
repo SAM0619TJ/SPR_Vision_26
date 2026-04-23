@@ -38,21 +38,15 @@ endif()
 target_link_libraries(io  tools MvCameraControl MVSDK usb-1.0 yaml-cpp serial)
 
 ################## 检查 ROS2 Foxy 环境 ##################
-find_package(ament_cmake QUIET)
-find_package(rclcpp QUIET)
-find_package(std_msgs QUIET)
-find_package(tf2_ros QUIET)
-find_package(geometry_msgs QUIET)
-
 # TF2 支持（用于 CBoard 实时发布 TF）
-if(ament_cmake_FOUND AND rclcpp_FOUND AND tf2_ros_FOUND AND geometry_msgs_FOUND)
+if(ENABLE_ROS2 AND ament_cmake_FOUND AND rclcpp_FOUND AND tf2_ros_FOUND AND geometry_msgs_FOUND)
     message(STATUS "ROS2 Foxy: TF2 support found, enabling real-time TF publishing in CBoard.")
     target_compile_definitions(io PRIVATE AMENT_CMAKE_FOUND)
     ament_target_dependencies(io rclcpp tf2_ros geometry_msgs)
 endif()
 
 # ROS2 扩展代码（需要 std_msgs）
-if(ament_cmake_FOUND AND rclcpp_FOUND AND std_msgs_FOUND)
+if(ENABLE_ROS2 AND ament_cmake_FOUND AND rclcpp_FOUND AND std_msgs_FOUND)
     message(STATUS "ROS2 Foxy: environment found, compiling ROS2-related code.")
     target_sources(io PRIVATE ros2/publish2nav.cpp ros2/ros2.cpp ros2/subscribe2nav.cpp)
     ament_target_dependencies(io rclcpp std_msgs)

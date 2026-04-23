@@ -62,6 +62,7 @@ int main(int argc, char * argv[])
 
   tools::Exiter exiter;
   tools::Plotter plotter;
+  plotter.configure(config_path);
   tools::Recorder recorder;
   io::Camera camera(config_path);
   io::Gimbal gimbal(config_path);

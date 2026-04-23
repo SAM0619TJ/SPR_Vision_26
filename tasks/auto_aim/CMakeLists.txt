@@ -52,12 +52,6 @@ endif()
 # 合并所有源文件
 list(APPEND AUTO_AIM_SOURCES ${YOLO_SOURCES})
 
-# 检查 ROS2 环境（用于 tracker 的 marker 功能）
-find_package(ament_cmake QUIET)
-find_package(rclcpp QUIET)
-find_package(std_msgs QUIET)
-find_package(visualization_msgs QUIET)
-
 add_subdirectory(planner/tinympc)
 
 add_library(auto_aim OBJECT ${AUTO_AIM_SOURCES})
@@ -99,7 +93,7 @@ if(TensorRT_FOUND)
 endif()
 
 # 如果 ROS2 可用，添加 ROS2 支持
-if(ament_cmake_FOUND AND rclcpp_FOUND AND std_msgs_FOUND AND visualization_msgs_FOUND)
+if(ENABLE_ROS2 AND ament_cmake_FOUND AND rclcpp_FOUND AND std_msgs_FOUND AND visualization_msgs_FOUND)
     message(STATUS "[auto_aim] ROS2 support enabled for tracker marker visualization")
     target_compile_definitions(auto_aim PRIVATE AMENT_CMAKE_FOUND)
     target_link_libraries(auto_aim rclcpp::rclcpp)

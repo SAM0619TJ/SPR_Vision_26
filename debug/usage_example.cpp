@@ -8,9 +8,10 @@
 //
 //   debug::WebDebugger debugger(8080);
 //   debugger.start();
-//   // 浏览器访问 http://10.122.237.155:8080
+//   // 浏览器访问 http://10.122.77.130:8080
 
-// ── 每帧检测完成后推送 ────────────────────────────────────────────────────────
+// ── 每帧检测完成后推送
+// ────────────────────────────────────────────────────────
 //
 // void push_debug(
 //   debug::WebDebugger & dbg,
@@ -22,11 +23,10 @@
 //   std::vector<debug::DetectionData> dets;
 //   for (const auto & armor : armors) {
 //     debug::DetectionData d;
-//     d.pts    = armor.points;                          // std::vector<cv::Point2f>
-//     d.color  = static_cast<int>(armor.color);         // 0=blue 1=red
-//     d.number = static_cast<int>(armor.name);          // 0=guard 1-5 6=outpost...
-//     d.conf   = armor.confidence;
-//     dets.push_back(d);
+//     d.pts    = armor.points;                          //
+//     std::vector<cv::Point2f> d.color  = static_cast<int>(armor.color); //
+//     0=red 1=blue d.number = static_cast<int>(armor.name);          // 0=guard
+//     1-5 6=outpost... d.conf   = armor.confidence; dets.push_back(d);
 //   }
 //
 //   std::vector<debug::ReprojectionData> reproj;

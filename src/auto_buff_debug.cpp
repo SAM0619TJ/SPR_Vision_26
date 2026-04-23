@@ -34,6 +34,7 @@ int main(int argc, char * argv[])
 
   // 初始化绘图器、录制器、退出器
   tools::Plotter plotter;
+  plotter.configure(config_path);
   tools::Recorder recorder;
   tools::Exiter exiter;
 

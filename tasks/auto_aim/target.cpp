@@ -328,8 +328,7 @@ void Target::update_ypda(const Armor & armor, int id)
     double z_pred = h_armor_xyz(ekf_.x, id)[2];
     constexpr double alpha = 0.25;  // 低通滤波衰减因子，加快向观测靠拢
     double z_smoothed = alpha * z_obs + (1 - alpha) * z_pred;
-    // 让观测在z方向更有话语权：不再放大测量噪声
-    double dz = std::abs(z_smoothed - z_pred);
+     double dz = std::abs(z_smoothed - z_pred);
     double r_z_scale = 1.0;  // 固定为1，避免残差过大时放弃观测
     Eigen::VectorXd R_dig_scaled{
       {4e-3 * r_yaw_scale, 4e-3 * r_yaw_scale, (log(std::abs(delta_angle) + 1) + 1) * r_z_scale,
