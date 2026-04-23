@@ -11,15 +11,15 @@ const std::string keys =
   "{config-path c  | configs/calibration.yaml | yaml配置文件路径 }"
   "{@input-folder  | assets/img_with_q        | 输入文件夹路径   }";
 
-std::vector<cv::Point3f> centers_3d(const cv::Size & pattern_size, const float center_distance)
+std::vector<cv::Point3f> corners_3d(const cv::Size & pattern_size, const float square_size)
 {
-  std::vector<cv::Point3f> centers_3d;
+  std::vector<cv::Point3f> corners_3d;
 
   for (int i = 0; i < pattern_size.height; i++)
     for (int j = 0; j < pattern_size.width; j++)
-      centers_3d.push_back({j * center_distance, i * center_distance, 0});
+      corners_3d.push_back({j * square_size, i * square_size, 0});
 
-  return centers_3d;
+  return corners_3d;
 }
 
 void load(
@@ -31,7 +31,7 @@ void load(
   auto yaml = YAML::LoadFile(config_path);
   auto pattern_cols = yaml["pattern_cols"].as<int>();
   auto pattern_rows = yaml["pattern_rows"].as<int>();
-  auto center_distance_mm = yaml["center_distance_mm"].as<double>();
+  auto square_size_mm = yaml["square_size_mm"].as<double>();
   cv::Size pattern_size(pattern_cols, pattern_rows);
 
   for (int i = 1; true; i++) {
@@ -44,12 +44,22 @@ void load(
     img_size = img.size();
 
     // 识别标定板
-    std::vector<cv::Point2f> centers_2d;
-    auto success = cv::findCirclesGrid(img, pattern_size, centers_2d, cv::CALIB_CB_SYMMETRIC_GRID);
+    std::vector<cv::Point2f> corners_2d;
+    auto success = cv::findChessboardCorners(
+      img, pattern_size, corners_2d,
+      cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE);
+
+    if (success) {
+      cv::Mat gray;
+      cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
+      cv::cornerSubPix(
+        gray, corners_2d, cv::Size(11, 11), cv::Size(-1, -1),
+        cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 30, 0.1));
+    }
 
     // 显示识别结果
     auto drawing = img.clone();
-    cv::drawChessboardCorners(drawing, pattern_size, centers_2d, success);
+    cv::drawChessboardCorners(drawing, pattern_size, corners_2d, success);
     cv::resize(drawing, drawing, {}, 0.5, 0.5);  // 缩小图片尺寸便于显示完全
     cv::imshow("Press any to continue", drawing);
     cv::waitKey(0);
@@ -59,8 +69,8 @@ void load(
     if (!success) continue;
 
     // 记录所需的数据
-    img_points.emplace_back(centers_2d);
-    obj_points.emplace_back(centers_3d(pattern_size, center_distance_mm));
+    img_points.emplace_back(corners_2d);
+    obj_points.emplace_back(corners_3d(pattern_size, square_size_mm));
   }
 }
 

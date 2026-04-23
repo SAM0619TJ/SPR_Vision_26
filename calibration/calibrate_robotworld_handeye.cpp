@@ -18,12 +18,15 @@ std::vector<cv::Point3f> centers_3d(const cv::Size & pattern_size, const float s
 {
   std::vector<cv::Point3f> centers_3d;
 
-  // 棋盘格在世界坐标系中的位置（标定板中心为原点，竖直摆放）
+  // 棋盘格内角点在标定板坐标系中的位置（标定板中心为原点，竖直摆放）
+  const float half_width = 0.5f * (pattern_size.width - 1) * square_size;
+  const float half_height = 0.5f * (pattern_size.height - 1) * square_size;
+
   for (int i = 0; i < pattern_size.height; i++) {
     for (int j = 0; j < pattern_size.width; j++) {
       float x = 0;
-      float y = (j - 0.5 * pattern_size.width) * square_size;   // 修复：Y轴从左到右
-      float z = (i - 0.5 * pattern_size.height) * square_size;  // 修复：Z轴从下到上
+      float y = j * square_size - half_width;   // Y轴从左到右
+      float z = half_height - i * square_size;  // Z轴从下到上
       centers_3d.push_back({x, y, z});
     }
   }
