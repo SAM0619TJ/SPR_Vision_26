@@ -3,6 +3,7 @@
 
 #include <netinet/in.h>  // sockaddr_in
 
+#include <cstdint>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -16,9 +17,13 @@ public:
 
   ~Plotter();
 
+  void configure(const std::string & config_path);
+
   void plot(const nlohmann::json & json);
 
 private:
+  void setDestination(const std::string & host, uint16_t port);
+
   int socket_;
   sockaddr_in destination_;
   std::mutex mutex_;

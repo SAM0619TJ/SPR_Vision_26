@@ -40,3 +40,4 @@ endif()
 # 链接fmt库以解决undefined reference错误
 target_link_libraries(tools PUBLIC ${OpenCV_LIBS})
 target_link_libraries(tools PUBLIC fmt::fmt)
+target_link_libraries(tools PUBLIC yaml-cpp)
