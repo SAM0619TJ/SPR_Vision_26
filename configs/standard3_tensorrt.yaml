@@ -1,4 +1,4 @@
-# enemy_color: "red"
+#enemy_color: "red"
 enemy_color: "blue"
 
 #####-----神经网络参数-----#####
@@ -45,11 +45,15 @@ web_debug_port: 8080
 # 是否启用 OpenCV 窗口显示（SSH/无桌面环境建议关闭）
 enable_imshow: false
 
+# PlotJuggler UDP 目标；Mac 上查看时填 Mac 的局域网 IP
+plotter_host: "10.122.56.164"
+plotter_port: 9870
+
 
 #####-----ROI-----#####
 roi:
   x: 420
-  y: 50
+  y: 100
   width: 600
   height: 600
 
@@ -72,13 +76,13 @@ max_temp_lost_count: 15
 outpost_max_temp_lost_count: 75
 
 #####-----aimer参数-----#####
-yaw_offset: 0 # degree -2.5
-pitch_offset: 0 # degree 2
+yaw_offset: -1.0 # degree -2.5
+pitch_offset: 1 # degree 2
 comming_angle: 55 # degree
 leaving_angle: 20 # degree
 decision_speed: 7 # rad/s
-high_speed_delay_time: 0.08 # s
-low_speed_delay_time: 0.1 # s planner use this value
+high_speed_delay_time: 0.14 # s
+low_speed_delay_time: 0.15 # s planner use this value
 
 #####-----shooter参数-----#####
 first_tolerance: 3 # 近距离射击容差，degree
@@ -88,7 +92,7 @@ auto_fire: true # 是否由自瞄控制射击
 
 #####-----相机配置-----#####
 camera_name: "hikrobot"
-exposure_ms: 2.5
+exposure_ms: 2
 gain: 16.0
 vid_pid: "2bdf:0001"
 # camera_name: "mindvision"

@@ -1,6 +1,7 @@
 #include <fmt/core.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
 #include <filesystem>
 #include <opencv2/highgui.hpp>
@@ -106,12 +107,26 @@ int main(int argc, char * argv[])
   }
 
   auto yaml = YAML::LoadFile(config_path);
-  const bool yolo_debug = yaml["yolo_debug"].as<bool>(false);
+  const bool display_requested = yaml["enable_imshow"].as<bool>(false);
+  const bool has_display =
+    std::getenv("DISPLAY") != nullptr || std::getenv("WAYLAND_DISPLAY") != nullptr;
+  bool enable_imshow = display_requested && has_display;
+  const bool yolo_debug = yaml["yolo_debug"].as<bool>(false) && enable_imshow;
   const bool enable_web_debug = yaml["enable_web_debug"].as<bool>(false);
   const int web_debug_port = yaml["web_debug_port"].as<int>(8080);
 
   tools::Plotter plotter;
+  plotter.configure(config_path);
   tools::Exiter exiter;
+
+  if (display_requested && !has_display) {
+    tools::logger()->warn(
+      "enable_imshow=true but no display detected, disabling imshow for headless run.");
+  }
+  if (yaml["yolo_debug"].as<bool>(false) && !enable_imshow) {
+    tools::logger()->warn(
+      "yolo_debug requested but imshow is disabled, forcing yolo_debug=false.");
+  }
 
 #ifdef AMENT_CMAKE_FOUND
   // 初始化ROS2可视化工具
@@ -451,12 +466,14 @@ int main(int argc, char * argv[])
 
     plotter.plot(data) ;
     
-    // 相机输出为 RGB 格式，imshow 需要 BGR 格式，进行转换
     cv::Mat img_bgr;
-    cv::cvtColor(img, img_bgr, cv::COLOR_RGB2BGR);
+    if (enable_imshow || debugger) {
+      // 相机输出为 RGB 格式，imshow/WebDebugger 使用 BGR 格式
+      cv::cvtColor(img, img_bgr, cv::COLOR_RGB2BGR);
+    }
 
     // 收集推送到 WebDebugger 的数据
-    {
+    if (debugger) {
       std::vector<debug::DetectionData> web_dets;
       std::vector<debug::ReprojectionData> web_reprojs;
       for (const auto & armor : armors) {
@@ -475,14 +492,19 @@ int main(int argc, char * argv[])
       }
       
       double latency = tools::delta_time(std::chrono::steady_clock::now(), yolo_start) * 1000.0;
-      if (debugger) {
-        debugger->push(img_bgr, web_dets, web_reprojs, latency);
-      }
+      debugger->push(img_bgr, web_dets, web_reprojs, latency);
     }
 
-    cv::imshow("rejection", img_bgr);
-    auto key = cv::waitKey(1);  
-    // if (key == 'q') break;
+    if (enable_imshow) {
+      try {
+        cv::imshow("rejection", img_bgr);
+        auto key = cv::waitKey(1);
+        if (key == 'q') break;
+      } catch (const cv::Exception & e) {
+        tools::logger()->warn("imshow failed, disabling OpenCV window: {}", e.what());
+        enable_imshow = false;
+      }
+    }
   }
 
 #ifdef AMENT_CMAKE_FOUND
