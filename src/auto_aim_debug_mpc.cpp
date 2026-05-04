@@ -26,7 +26,8 @@ using namespace std::chrono_literals;
 
 const std::string keys =
     "{help h usage ? |                        | 输出命令行参数说明}"
-    "{@config-path   | configs/standard3_tensorrt.yaml| 位置参数，yaml配置文件路径 }";
+    "{@config-path   | configs/standard3_tensorrt.yaml| "
+    "位置参数，yaml配置文件路径 }";
 
 int main(int argc, char *argv[]) {
   tools::Exiter exiter;
@@ -44,18 +45,18 @@ int main(int argc, char *argv[]) {
   const bool display_requested = yaml["enable_imshow"].as<bool>(false);
   const bool enable_web_debug = yaml["enable_web_debug"].as<bool>(false);
   const int web_debug_port = yaml["web_debug_port"].as<int>(8080);
-  const bool has_display =
-      std::getenv("DISPLAY") != nullptr || std::getenv("WAYLAND_DISPLAY") != nullptr;
+  const bool has_display = std::getenv("DISPLAY") != nullptr ||
+                           std::getenv("WAYLAND_DISPLAY") != nullptr;
   const bool enable_imshow = display_requested && has_display;
   const bool yolo_debug = yaml["yolo_debug"].as<bool>(false) && enable_imshow;
 
   if (display_requested && !has_display) {
-    tools::logger()->warn(
-        "enable_imshow=true but no display detected, disabling imshow for headless run.");
+    tools::logger()->warn("enable_imshow=true but no display detected, "
+                          "disabling imshow for headless run.");
   }
   if (yaml["yolo_debug"].as<bool>(false) && !enable_imshow) {
-    tools::logger()->warn(
-        "yolo_debug requested but imshow is disabled, forcing yolo_debug=false.");
+    tools::logger()->warn("yolo_debug requested but imshow is disabled, "
+                          "forcing yolo_debug=false.");
   }
 
   io::Gimbal gimbal(config_path);
@@ -217,8 +218,8 @@ int main(int argc, char *argv[]) {
         auto target = targets.front();
         for (const Eigen::Vector4d &xyza : target.armor_xyza_list()) {
           debug::ReprojectionData r;
-          r.pts = solver.reproject_armor(
-              xyza.head(3), xyza[3], target.armor_type, target.name);
+          r.pts = solver.reproject_armor(xyza.head(3), xyza[3],
+                                         target.armor_type, target.name);
           web_reprojs.push_back(r);
         }
       }

@@ -1,7 +1,7 @@
-#enemy_color: "red"
-enemy_color: "blue"
+enemy_color: "red"
+#enemy_color: "blue"
 
-#####-----神经网络参数-----#####
+#####----s-神经网络参数-----#####
 # 推理后端选择：tensorrt | openvino
 inference_backend: tensorrt
 
@@ -30,7 +30,7 @@ yolov5_onnx_path: /home/spr/SPR_Vision_26/assets/engines/0526.onnx
 device: GPU
 
 # 推理参数
-min_confidence: 0.8
+min_confidence: 0.75
 yolo_debug: false # YOLO调试可视化与截图开关（true时可能持续写入imgs）
 use_traditional: false  # 是否启用传统方法（在神经网络基础上进行后处理）
 use_async_inference: true  # 异步推理（可提升帧率，但有1帧延迟）
