@@ -147,11 +147,11 @@ add_subdirectory(tasks/auto_buff)
 add_subdirectory(tasks/omniperception)
 
 # ── 可执行文件 ────────────────────────────────────────────────────────────────
-add_executable(standard src/standard.cpp)
-target_link_libraries(standard fmt::fmt yaml-cpp auto_aim vision_debug tools io ${OpenCV_LIBS})
-
 add_executable(auto_aim_debug_mpc src/auto_aim_debug_mpc.cpp)
 target_link_libraries(auto_aim_debug_mpc fmt::fmt yaml-cpp auto_aim vision_debug tools io ${OpenCV_LIBS})
+
+add_executable(standard_mpc src/standard_mpc.cpp)
+target_link_libraries(standard_mpc fmt::fmt yaml-cpp auto_aim tools io ${OpenCV_LIBS})
 
 add_executable(auto_aim_orin_debug src/auto_aim_orin_debug.cpp)
 target_link_libraries(auto_aim_orin_debug fmt::fmt yaml-cpp auto_aim vision_debug tools io ${OpenCV_LIBS})

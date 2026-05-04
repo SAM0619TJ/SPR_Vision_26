@@ -257,9 +257,10 @@ std::string WebDebugger::build_json(
 
   // frame (base64 jpg，缩小到 640 宽以减少带宽)
   cv::Mat small;
+  float scale = 1.0f;
   if (frame.cols > 640) {
-    float s = 640.0f / frame.cols;
-    cv::resize(frame, small, {}, s, s);
+    scale = 640.0f / frame.cols;
+    cv::resize(frame, small, {}, scale, scale);
   } else {
     small = frame;
   }
@@ -273,7 +274,7 @@ std::string WebDebugger::build_json(
     ss << "{\"pts\":[";
     for (size_t j = 0; j < d.pts.size(); ++j) {
       if (j) ss << ",";
-      ss << "[" << d.pts[j].x << "," << d.pts[j].y << "]";
+      ss << "[" << d.pts[j].x * scale << "," << d.pts[j].y * scale << "]";
     }
     ss << "],\"color\":" << d.color
        << ",\"number\":" << d.number
@@ -289,7 +290,7 @@ std::string WebDebugger::build_json(
     ss << "{\"pts\":[";
     for (size_t j = 0; j < r.pts.size(); ++j) {
       if (j) ss << ",";
-      ss << "[" << r.pts[j].x << "," << r.pts[j].y << "]";
+      ss << "[" << r.pts[j].x * scale << "," << r.pts[j].y * scale << "]";
     }
     ss << "]}";
   }

@@ -178,7 +178,7 @@ int main(int argc, char *argv[]) {
       cv::cvtColor(img, display, cv::COLOR_RGB2BGR);
     }
 
-    if (!targets.empty()) {
+    if (enable_imshow && !targets.empty()) {
       auto target = targets.front();
 
       std::vector<Eigen::Vector4d> armor_xyza_list = target.armor_xyza_list();

@@ -1,73 +1,38 @@
+#include <atomic>
 #include <chrono>
-#include <opencv2/opencv.hpp>
-#include <thread>
 #include <optional>
-#include <yaml-cpp/yaml.h>
+#include <thread>
 
 #include "io/camera.hpp"
 #include "io/gimbal/gimbal.hpp"
-#include "io/command.hpp"
-#include "tasks/auto_aim/aimer.hpp"
-#include "tasks/auto_aim/multithread/commandgener.hpp"
-#include "tasks/auto_aim/multithread/mt_detector.hpp"
-#include "tasks/auto_aim/shooter.hpp"
+#include "tasks/auto_aim/planner/planner.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
-#include "tasks/auto_buff/buff_aimer.hpp"
-#include "tasks/auto_buff/buff_detector.hpp"
-#include "tasks/auto_buff/buff_solver.hpp"
-#include "tasks/auto_buff/buff_target.hpp"
-#include "tasks/auto_buff/buff_type.hpp"
+#include "tasks/auto_aim/yolo.hpp"
 #include "tools/exiter.hpp"
-#include "tools/img_tools.hpp"
 #include "tools/logger.hpp"
-#include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
-#include "tools/recorder.hpp"
-
-const std::string keys =
-  "{help h usage ? | | 输出命令行参数说明}"
-  "{@config-path   | | yaml配置文件路径 }";
+#include "tools/thread_safe_queue.hpp"
 
 using namespace std::chrono_literals;
 
-int main(int argc, char * argv[])
-{
+const std::string keys =
+    "{help h usage ? |                        | 输出命令行参数说明}"
+    "{@config-path   | configs/standard3_tensorrt.yaml| "
+    "位置参数，yaml配置文件路径 }";
+
+int main(int argc, char *argv[]) {
   cv::CommandLineParser cli(argc, argv, keys);
-  auto config_path = cli.get<std::string>("@config-path");
-  if (cli.has("help") || !cli.has("@config-path")) {
+  auto config_path = cli.get<std::string>(0);
+  if (cli.has("help") || config_path.empty()) {
     cli.printMessage();
     return 0;
   }
 
-  // 读取可选开关：是否启用打符（避免在不需要时加载不兼容的 IR 模型）
-  bool enable_buff = false;
-  bool force_auto_aim = false;
-  // 电控对斜坡输入存在稳态偏差，按匀速目标做 yaw 前馈补偿：yaw_cmd = yaw + t0 * yaw_vel
-  // 单位：t0(秒)，yaw/yaw_vel(弧度/弧度每秒)
-  // 支持按方向分别设置前馈时间常数：yaw_ramp_t0_pos（向右/正），yaw_ramp_t0_neg（向左/负）。
-  double yaw_ramp_t0 = 0.0;
-  double yaw_ramp_t0_pos = 0.0;
-  double yaw_ramp_t0_neg = 0.0;
-  try {
-    auto yaml = YAML::LoadFile(config_path);
-    if (yaml["enable_buff"]) enable_buff = yaml["enable_buff"].as<bool>();
-    if (yaml["force_auto_aim"]) force_auto_aim = yaml["force_auto_aim"].as<bool>();
-    if (yaml["yaw_ramp_t0"]) yaw_ramp_t0 = yaml["yaw_ramp_t0"].as<double>();
-    // 默认使用旧的 yaw_ramp_t0（兼容），可被方向专用配置覆盖
-    yaw_ramp_t0_pos = yaw_ramp_t0_neg = yaw_ramp_t0;
-    if (yaml["yaw_ramp_t0_pos"]) yaw_ramp_t0_pos = yaml["yaw_ramp_t0_pos"].as<double>();
-    if (yaml["yaw_ramp_t0_neg"]) yaw_ramp_t0_neg = yaml["yaw_ramp_t0_neg"].as<double>();
-  } catch (...) { /* keep default */ }
-
   tools::Exiter exiter;
-  tools::Plotter plotter;
-  plotter.configure(config_path);
-  tools::Recorder recorder;
-  io::Camera camera(config_path);
   io::Gimbal gimbal(config_path);
+  io::Camera camera(config_path);
 
-  auto_aim::YOLO yolo(config_path, true);
+  auto_aim::YOLO yolo(config_path, false);
   auto_aim::Solver solver(config_path);
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Planner planner(config_path);
@@ -75,142 +40,67 @@ int main(int argc, char * argv[])
   tools::ThreadSafeQueue<std::optional<auto_aim::Target>, true> target_queue(1);
   target_queue.push(std::nullopt);
 
-  std::unique_ptr<auto_buff::Buff_Detector> buff_detector;
-  std::unique_ptr<auto_buff::Solver> buff_solver;
-  std::unique_ptr<auto_buff::Aimer> buff_aimer;
-  std::unique_ptr<auto_buff::SmallTarget> buff_small_target;
-  std::unique_ptr<auto_buff::BigTarget> buff_big_target;
-  if (enable_buff) {
-    buff_detector = std::make_unique<auto_buff::Buff_Detector>(config_path);
-    buff_solver = std::make_unique<auto_buff::Solver>(config_path);
-    buff_aimer = std::make_unique<auto_buff::Aimer>(config_path);
-    buff_small_target = std::make_unique<auto_buff::SmallTarget>();
-    buff_big_target = std::make_unique<auto_buff::BigTarget>();
-  } else {
-    tools::logger()->info("[standard_mpc] Buff modules disabled (enable_buff=false)");
-  }
-
-  cv::Mat img;
-  Eigen::Quaterniond q;
-  std::chrono::steady_clock::time_point t;
-
   std::atomic<bool> quit = false;
-
   std::atomic<io::GimbalMode> mode{io::GimbalMode::IDLE};
-  auto last_mode{io::GimbalMode::IDLE};
-  std::atomic<double> bullet_speed_atomic{0.0};
 
   auto plan_thread = std::thread([&]() {
-    auto t0 = std::chrono::steady_clock::now();
-    uint16_t last_bullet_count = 0;
-
     while (!quit) {
-      if (!target_queue.empty() && mode == io::GimbalMode::AUTO_AIM) {
+      const auto current_mode = mode.load();
+      if (current_mode == io::GimbalMode::AUTO_AIM) {
         auto target = target_queue.front();
-        float bs = static_cast<float>(bullet_speed_atomic.load());
-        auto plan = planner.plan(target, bs);
-
-        io::Command cmd{};
-        cmd.control = plan.control;
-        cmd.shoot = plan.fire;
-        // yaw 前馈补偿：按目标角速度方向分别选择前馈时间常数
-        // 通过在发送侧加 t0*yaw_vel 的补偿，使稳态时视觉误差（yaw）逼近 0
-        double yaw_t0_use = (plan.yaw_vel > 0) ? yaw_ramp_t0_pos : ((plan.yaw_vel < 0) ? yaw_ramp_t0_neg : 0.0);
-        cmd.yaw = plan.yaw + yaw_t0_use * plan.yaw_vel;
-        cmd.pitch = plan.pitch;
-        cmd.horizon_distance = 0.0;
-        gimbal.send_command_scm(cmd);
-
-        std::this_thread::sleep_for(10ms);
+        auto gs = gimbal.state();
+        auto plan = planner.plan(target, gs.bullet_speed);
+        gimbal.send(plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc,
+                    plan.pitch, plan.pitch_vel, plan.pitch_acc);
+        std::this_thread::sleep_for(8ms);
       } else {
-        std::this_thread::sleep_for(200ms);
+        // 比赛版暂时关闭打符和其它模式，确保非自瞄状态不发控制/开火。
+        gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
+        std::this_thread::sleep_for(20ms);
       }
     }
   });
 
-  while (!exiter.exit()) {
-    // 模式：可用 YAML 强制自瞄，或直接使用 Gimbal 模式
-    if (force_auto_aim) {
-      mode = io::GimbalMode::AUTO_AIM;
-    } else {
-      mode = gimbal.mode();
-    }
+  cv::Mat img;
+  std::chrono::steady_clock::time_point t;
+  int frame_count = 0;
+  auto last_mode = io::GimbalMode::IDLE;
 
-    if (last_mode != mode) {
-      const char* MODE_STR[] = {"IDLE", "AUTO_AIM", "SMALL_BUFF", "BIG_BUFF"};
-      tools::logger()->info("Switch to {}", MODE_STR[static_cast<int>(mode.load())]);
-      last_mode = mode.load();
+  while (!exiter.exit()) {
+    const auto current_mode = gimbal.mode();
+    mode = current_mode;
+    if (last_mode != current_mode) {
+      tools::logger()->info("Switch to {}", gimbal.str(current_mode));
+      if (current_mode == io::GimbalMode::SMALL_BUFF ||
+          current_mode == io::GimbalMode::BIG_BUFF) {
+        tools::logger()->warn("Buff mode is disabled in standard_mpc.");
+      }
+      last_mode = current_mode;
     }
 
     camera.read(img, t);
-    q = gimbal.q(t);
-    // 从 Gimbal 接收弹速
-    auto gs = gimbal.state();
-    bullet_speed_atomic = gs.bullet_speed;
-    recorder.record(img, q, t);
+    auto q = gimbal.q(t);
     solver.set_R_gimbal2world(q);
 
-    /// 自瞄
-    if (mode.load() == io::GimbalMode::AUTO_AIM) {
-      auto armors = yolo.detect(img);
+    if (current_mode == io::GimbalMode::AUTO_AIM) {
+      auto armors = yolo.detect(img, frame_count);
       auto targets = tracker.track(armors, t);
       if (!targets.empty())
         target_queue.push(targets.front());
       else
         target_queue.push(std::nullopt);
-    }
-
-    /// 打符
-    else if (mode.load() == io::GimbalMode::SMALL_BUFF || mode.load() == io::GimbalMode::BIG_BUFF) {
-      if (!enable_buff) {
-        // 未启用打符，保持不控，避免误触发
-        io::Command idle{}; idle.control = false; idle.shoot = false; idle.yaw = 0; idle.pitch = 0; idle.horizon_distance = 0;
-        gimbal.send_command_scm(idle);
-      } else {
-        buff_solver->set_R_gimbal2world(q);
-
-        auto power_runes = buff_detector->detect(img);
-
-        buff_solver->solve(power_runes);
-
-        auto_aim::Plan buff_plan;
-        if (mode.load() == io::GimbalMode::SMALL_BUFF) {
-          buff_small_target->get_target(power_runes, t);
-          auto target_copy = *buff_small_target;
-          buff_plan = buff_aimer->mpc_aim(target_copy, t, gs, true);
-        } else if (mode.load() == io::GimbalMode::BIG_BUFF) {
-          buff_big_target->get_target(power_runes, t);
-          auto target_copy = *buff_big_target;
-          buff_plan = buff_aimer->mpc_aim(target_copy, t, gs, true);
-        }
-
-        io::Command cmd2{};
-        cmd2.control = buff_plan.control;
-        cmd2.shoot = buff_plan.fire;
-  // 打符同样应用 yaw 斜坡补偿（按方向选用对应的 t0）
-  double buff_yaw_t0_use = (buff_plan.yaw_vel > 0) ? yaw_ramp_t0_pos : ((buff_plan.yaw_vel < 0) ? yaw_ramp_t0_neg : 0.0);
-  cmd2.yaw = buff_plan.yaw + buff_yaw_t0_use * buff_plan.yaw_vel;
-        cmd2.pitch = buff_plan.pitch;
-        cmd2.horizon_distance = 0.0;
-        gimbal.send_command_scm(cmd2);
-      }
-
     } else {
-      io::Command idle{}; idle.control = false; idle.shoot = false; idle.yaw = 0; idle.pitch = 0; idle.horizon_distance = 0;
-      gimbal.send_command_scm(idle);
+      target_queue.push(std::nullopt);
     }
 
-    // Debug preview window for standard_mpc
-    // Tip: press 'q' to quit
-    // cv::imshow("standard_mpc", img);
-    int key = cv::waitKey(1);
-    if (key == 'q') break;
+    ++frame_count;
   }
 
-    
-  if (plan_thread.joinable()) plan_thread.join();
-  io::Command stop{}; stop.control = false; stop.shoot = false; stop.yaw = 0; stop.pitch = 0; stop.horizon_distance = 0;
-  gimbal.send_command_scm(stop);
+  quit = true;
+  target_queue.push(std::nullopt);
+  if (plan_thread.joinable())
+    plan_thread.join();
+  gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
 
   return 0;
 }
