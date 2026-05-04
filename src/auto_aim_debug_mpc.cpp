@@ -1,11 +1,14 @@
 #include <fmt/core.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
 #include <thread>
+#include <termios.h>
+#include <unistd.h>
 #include <yaml-cpp/yaml.h>
 
 #include "debug/web_debugger.hpp"
@@ -23,6 +26,112 @@
 #include "tools/thread_safe_queue.hpp"
 
 using namespace std::chrono_literals;
+
+namespace {
+
+constexpr unsigned char kCtrlQ = 17;
+
+class TerminalRawMode {
+public:
+  bool enable() {
+    if (!isatty(STDIN_FILENO))
+      return false;
+
+    if (tcgetattr(STDIN_FILENO, &original_) != 0)
+      return false;
+
+    termios raw = original_;
+    raw.c_lflag &= static_cast<tcflag_t>(~(ICANON | ECHO));
+    raw.c_iflag &= static_cast<tcflag_t>(~(IXON | IXOFF));
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 1;
+
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0)
+      return false;
+
+    enabled_ = true;
+    return true;
+  }
+
+  void restore() {
+    if (!enabled_)
+      return;
+    tcsetattr(STDIN_FILENO, TCSANOW, &original_);
+    enabled_ = false;
+  }
+
+  ~TerminalRawMode() { restore(); }
+
+private:
+  termios original_{};
+  bool enabled_ = false;
+};
+
+void stop_gimbal(io::Gimbal &gimbal) {
+  gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
+}
+
+void cleanup_auto_aim_processes() {
+  const auto self_pid = static_cast<long>(getpid());
+  const auto cmd = fmt::format(
+      "sh -c '"
+      "for signal in TERM KILL; do "
+      "for exe in /proc/[0-9]*/exe; do "
+      "path=$(readlink \"$exe\" 2>/dev/null) || continue; "
+      "name=${{path##*/}}; pid=${{exe#/proc/}}; pid=${{pid%/exe}}; "
+      "case \"$name\" in "
+      "auto_aim_debug_mpc|auto_aim_orin_debug|mt_auto_aim_debug|auto_aim_test|standard_mpc) "
+      "[ \"$pid\" != \"$1\" ] && kill -$signal \"$pid\" 2>/dev/null ;; "
+      "esac; "
+      "done; "
+      "if [ \"$signal\" = TERM ]; then sleep 0.2; fi; "
+      "done' sh {}",
+      self_pid);
+
+  const auto ret = std::system(cmd.c_str());
+  if (ret != 0) {
+    tools::logger()->warn("auto aim process cleanup command returned {}", ret);
+  }
+}
+
+std::thread start_ctrl_q_thread(std::atomic<bool> &quit,
+                                std::atomic<bool> &app_running,
+                                io::Gimbal &gimbal,
+                                TerminalRawMode &terminal) {
+  return std::thread([&]() {
+    if (!terminal.enable()) {
+      tools::logger()->warn("stdin is not a TTY, Ctrl+Q emergency exit disabled.");
+      return;
+    }
+
+    tools::logger()->info("Press Ctrl+Q to force quit auto aim processes.");
+
+    while (app_running && !quit) {
+      unsigned char key = 0;
+      const auto n = read(STDIN_FILENO, &key, 1);
+      if (n == 1 && key == kCtrlQ) {
+        tools::logger()->warn("Ctrl+Q received, force quitting auto aim.");
+        quit = true;
+        stop_gimbal(gimbal);
+        cleanup_auto_aim_processes();
+
+        std::this_thread::sleep_for(500ms);
+        if (app_running) {
+          terminal.restore();
+          std::_Exit(0);
+        }
+        return;
+      }
+
+      if (n < 0 && errno != EINTR && errno != EAGAIN) {
+        tools::logger()->warn("stdin read failed, Ctrl+Q emergency exit disabled.");
+        return;
+      }
+    }
+  });
+}
+
+} // namespace
 
 const std::string keys =
     "{help h usage ? |                        | 输出命令行参数说明}"
@@ -76,6 +185,10 @@ int main(int argc, char *argv[]) {
   target_queue.push(std::nullopt);
 
   std::atomic<bool> quit = false;
+  std::atomic<bool> app_running = true;
+  TerminalRawMode terminal;
+  auto ctrl_q_thread = start_ctrl_q_thread(quit, app_running, gimbal, terminal);
+
   auto plan_thread = std::thread([&]() {
     auto t0 = std::chrono::steady_clock::now();
     uint16_t last_bullet_count = 0;
@@ -141,7 +254,7 @@ int main(int argc, char *argv[]) {
   std::chrono::steady_clock::time_point t;
   int frame_count = 0;
 
-  while (!exiter.exit()) {
+  while (!exiter.exit() && !quit) {
     auto t_frame_start = std::chrono::steady_clock::now();
 
     camera.read(img, t);
@@ -199,8 +312,10 @@ int main(int argc, char *argv[]) {
       cv::resize(display, display, {}, 0.5, 0.5);
       cv::imshow("reprojection", display);
       auto key = cv::waitKey(1);
-      if (key == 'q')
+      if (key == 'q') {
+        quit = true;
         break;
+      }
     }
 
     if (debugger) {
@@ -232,6 +347,9 @@ int main(int argc, char *argv[]) {
   quit = true;
   if (plan_thread.joinable())
     plan_thread.join();
+  app_running = false;
+  if (ctrl_q_thread.joinable())
+    ctrl_q_thread.join();
   gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
 
   return 0;

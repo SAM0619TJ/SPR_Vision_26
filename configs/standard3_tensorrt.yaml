@@ -1,5 +1,5 @@
-enemy_color: "red"
-#enemy_color: "blue"
+#enemy_color: "red"
+enemy_color: "blue"
 
 #####----s-神经网络参数-----#####
 # 推理后端选择：tensorrt | openvino
@@ -30,7 +30,7 @@ yolov5_onnx_path: /home/spr/SPR_Vision_26/assets/engines/0526.onnx
 device: GPU
 
 # 推理参数
-min_confidence: 0.75
+min_confidence: 0.8
 yolo_debug: false # YOLO调试可视化与截图开关（true时可能持续写入imgs）
 use_traditional: false  # 是否启用传统方法（在神经网络基础上进行后处理）
 use_async_inference: true  # 异步推理（可提升帧率，但有1帧延迟）
@@ -46,7 +46,7 @@ web_debug_port: 8080
 enable_imshow: false
 
 # PlotJuggler UDP 目标；Mac 上查看时填 Mac 的局域网 IP
-plotter_host: "10.122.130.101"
+plotter_host: "10.122.203.112"
 plotter_port: 9870
 
 

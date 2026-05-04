@@ -249,6 +249,165 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="1234", ATTRS{idProduct}=="1234", ATTRS{seria
 
 ## 已知事项
 
-- `autostart.sh` 仍保留了旧工程路径与旧可执行文件名，直接使用前需要按当前仓库路径和目标重新修改
 - 部分配置文件中包含与本机相关的绝对路径，迁移环境时请优先检查
 - 若在无显示环境运行，建议关闭 `enable_imshow`，仅保留 Web 调试或日志输出
+
+## Orin NX 开机自启动
+
+实车建议使用 `systemd` 自启动，不依赖 GNOME 桌面登录。Hikrobot 工业相机不一定出现在 `/dev/video*`，本项目通过 MVS SDK 枚举相机，需要在 systemd 环境里显式配置 MVS 运行时环境变量。
+
+### 启动脚本
+
+`/home/spr/SPR_Vision_26/autostart.sh`：
+
+```bash
+#!/bin/bash
+set -e
+
+cd /home/spr/SPR_Vision_26
+
+# Hikrobot MVS runtime environment
+export ALLUSERSPROFILE=/opt/MVS/MVFG
+export MVCAM_GENICAM_CLPROTOCOL=/opt/MVS/lib/CLProtocol
+export MVCAM_SDK_PATH=/opt/MVS
+export MVCAM_COMMON_RUNENV=/opt/MVS/lib
+
+# Runtime libraries
+export LD_LIBRARY_PATH=/opt/MVS/lib/aarch64:/usr/local/cuda-12.6/lib64:/usr/local/cuda/lib64:/usr/lib/aarch64-linux-gnu:/usr/local/lib:$LD_LIBRARY_PATH
+
+# Minimal PATH for systemd
+export PATH=/usr/local/cuda-12.6/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Wait for USB camera and serial devices to settle
+sleep 15
+
+echo "autoaim start $(date)" >> /home/spr/vision_autostart.log
+
+exec ./build/auto_aim_debug_mpc configs/standard3_tensorrt.yaml
+```
+
+赋予执行权限：
+
+```bash
+chmod +x /home/spr/SPR_Vision_26/autostart.sh
+```
+
+### systemd 服务
+
+`/etc/systemd/system/autoaim.service`：
+
+```ini
+[Unit]
+Description=SPR Vision Auto Aim
+After=systemd-udev-settle.service multi-user.target
+Wants=systemd-udev-settle.service
+
+[Service]
+Type=simple
+User=spr
+WorkingDirectory=/home/spr/SPR_Vision_26
+ExecStart=/home/spr/SPR_Vision_26/autostart.sh
+Restart=always
+RestartSec=8
+SupplementaryGroups=dialout plugdev video render
+
+[Install]
+WantedBy=multi-user.target
+```
+
+启用并启动：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable autoaim.service
+sudo systemctl start autoaim.service
+```
+
+查看状态与日志：
+
+```bash
+systemctl status autoaim.service
+journalctl -u autoaim.service -f -o cat
+```
+
+停止服务：
+
+```bash
+sudo systemctl stop autoaim.service
+```
+
+### USB 设备权限
+
+USB 串口通常通过 `/dev/gimbal` 使用，用户需要在 `dialout` 组。Hikrobot USB 相机建议增加 udev 规则，避免开机时 `/dev/bus/usb/...` 权限未正确套用。
+
+`/etc/udev/rules.d/99-hikrobot.rules`：
+
+```text
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2bdf", ATTR{idProduct}=="0001", MODE="0666", GROUP="plugdev", TAG+="uaccess"
+```
+
+加载规则：
+
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+检查设备：
+
+```bash
+lsusb | grep 2bdf
+lsusb | grep 1a86
+ls -l /dev/gimbal
+```
+
+`lsusb` 中的 `Bus` 和 `Device` 编号每次插拔可能变化，例如 `Bus 002 Device 004` 对应 `/dev/bus/usb/002/004`。不要在脚本中固定这个路径，应按 `idVendor:idProduct` 匹配。
+
+### 常见排错
+
+如果手动运行正常，但 systemd 下出现：
+
+```text
+MV_CC_EnumDevices failed: 0x80000006
+Unable to open usb!
+```
+
+优先检查 systemd 是否缺少 MVS 环境变量：
+
+```bash
+env | grep -E "MVS|MVCAM|GENICAM|LD_LIBRARY|PATH"
+sudo systemctl show autoaim.service -p Environment
+```
+
+手动终端一般会包含：
+
+```text
+ALLUSERSPROFILE=/opt/MVS/MVFG
+MVCAM_GENICAM_CLPROTOCOL=/opt/MVS/lib/CLProtocol
+MVCAM_SDK_PATH=/opt/MVS
+MVCAM_COMMON_RUNENV=/opt/MVS/lib
+LD_LIBRARY_PATH=/opt/MVS/lib/aarch64:...
+```
+
+若 systemd 环境为空，需要将这些变量写入 `autostart.sh`。
+
+若需要排除权限问题，可临时将服务中的 `User=spr` 改为 `User=root` 测试。若 root 可以枚举相机，说明是权限或 udev 问题；若 root 也失败，优先检查 MVS 环境变量、启动时机或程序内 USB reset 逻辑。测试后应改回 `User=spr`。
+
+手动排查流程：
+
+```bash
+sudo systemctl stop autoaim.service
+pkill -f auto_aim_debug_mpc
+sleep 3
+lsusb | grep 2bdf
+./build/auto_aim_debug_mpc configs/standard3_tensorrt.yaml
+```
+```
+# 开关闭自启动服务
+sudo systemctl disable autoaim.service
+// 暂时停止
+systemctl stop autoaim.service
+//restart
+systemctl restart autoaim.service
+//查看是否有自启动
+systemctl is-enabled autoaim.service

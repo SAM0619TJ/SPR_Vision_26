@@ -1,6 +1,7 @@
 #include "web_debugger.hpp"
 
 #include <arpa/inet.h>
+#include <cerrno>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -17,6 +18,16 @@
 
 namespace debug
 {
+
+namespace
+{
+void set_socket_timeout(int fd, int sec, int usec = 0)
+{
+  timeval tv{sec, usec};
+  setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+}
+}
 
 // ── SHA-1 (RFC 3174) ─────────────────────────────────────────────────────────
 static std::array<uint8_t, 20> sha1(const std::string & input)
@@ -114,18 +125,19 @@ void WebDebugger::serve()
   addr.sin_port = htons(port_);
 
   if (bind(server_fd, (sockaddr*)&addr, sizeof(addr)) < 0) { close(server_fd); return; }
-  listen(server_fd, 8);
+  listen(server_fd, 32);
 
   // 非阻塞 accept
-  struct timeval tv{0, 100000};  // 100ms timeout
   fd_set fds;
 
   while (running_) {
+    struct timeval tv{0, 100000};  // select 会修改 timeval，必须每轮重置
     FD_ZERO(&fds);
     FD_SET(server_fd, &fds);
     if (select(server_fd + 1, &fds, nullptr, nullptr, &tv) > 0) {
       int client_fd = accept(server_fd, nullptr, nullptr);
       if (client_fd >= 0) {
+        set_socket_timeout(client_fd, 1);
         std::thread([this, client_fd]() { handle_http(client_fd); }).detach();
       }
     }
@@ -151,7 +163,10 @@ void WebDebugger::handle_http(int fd)
     std::string key = req.substr(pos, end - pos);
 
     std::string resp = ws_handshake_response(key);
-    send(fd, resp.c_str(), resp.size(), 0);
+    if (send(fd, resp.c_str(), resp.size(), MSG_NOSIGNAL) < 0) {
+      close(fd);
+      return;
+    }
 
     {
       std::lock_guard<std::mutex> lk(clients_mutex_);
@@ -206,7 +221,10 @@ void WebDebugger::handle_websocket(int fd)
     std::lock_guard<std::mutex> lk(data_mutex_);
     if (!latest_json_.empty()) {
       std::string frame = ws_frame(latest_json_);
-      send(fd, frame.c_str(), frame.size(), MSG_NOSIGNAL);
+      if (send(fd, frame.c_str(), frame.size(), MSG_NOSIGNAL | MSG_DONTWAIT) < 0 &&
+          errno != EAGAIN && errno != EWOULDBLOCK) {
+        return;
+      }
     }
   }
 
@@ -217,9 +235,12 @@ void WebDebugger::handle_websocket(int fd)
     fd_set fds;
     FD_ZERO(&fds);
     FD_SET(fd, &fds);
-    if (select(fd + 1, &fds, nullptr, nullptr, &tv) > 0) {
+    int ready = select(fd + 1, &fds, nullptr, nullptr, &tv);
+    if (ready > 0) {
       int n = recv(fd, buf.data(), buf.size(), 0);
       if (n <= 0) break;  // 客户端断开
+    } else if (ready < 0) {
+      break;
     }
   }
 }
@@ -228,8 +249,9 @@ void WebDebugger::broadcast(const std::string & msg)
 {
   std::lock_guard<std::mutex> lk(clients_mutex_);
   for (auto it = ws_clients_.begin(); it != ws_clients_.end(); ) {
-    int r = send(*it, msg.c_str(), msg.size(), MSG_NOSIGNAL);
-    if (r < 0) {
+    ssize_t r = send(*it, msg.c_str(), msg.size(), MSG_NOSIGNAL | MSG_DONTWAIT);
+    if (r < 0 || static_cast<size_t>(r) != msg.size()) {
+      shutdown(*it, SHUT_RDWR);
       it = ws_clients_.erase(it);
     } else {
       ++it;
